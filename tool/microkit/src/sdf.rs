@@ -134,6 +134,7 @@ pub struct SysIrq {
     pub irq: u64,
     pub id: u64,
     pub trigger: IrqTrigger,
+    pub cpu: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -177,6 +178,7 @@ pub struct ProtectionDomain {
     pub passive: bool,
     pub stack_size: u64,
     pub smc: bool,
+    pub cpu: u64,
     pub program_image: PathBuf,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
@@ -206,6 +208,7 @@ pub struct VirtualMachine {
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct VirtualCpu {
     pub id: u64,
+    pub cpu: u64,
 }
 
 /// To avoid code duplication for handling protection domains
@@ -359,7 +362,8 @@ impl ProtectionDomain {
             "period",
             "passive",
             "stack_size",
-            // The SMC field is only available in certain configurations
+            "cpu",
+            // The 'smc' field is only available in certain configurations
             // but we do the error-checking further down.
             "smc",
         ];
@@ -421,6 +425,17 @@ impl ProtectionDomain {
         } else {
             PD_DEFAULT_STACK_SIZE
         };
+
+        let cpu = if let Some(xml_cpu) = node.attribute("cpu") {
+            sdf_parse_number(xml_cpu, node)?
+        } else {
+            // Default to CPU 0, the boot CPU
+            0
+        };
+
+        if cpu >= config.cores {
+            return Err(value_error(xml_sdf, node, format!("cpu given '{}' is invalid, platform is configured with '{}' CPUs", cpu, config.cores)))
+        }
 
         let smc = if let Some(xml_smc) = node.attribute("smc") {
             match str_to_bool(xml_smc) {
@@ -600,6 +615,7 @@ impl ProtectionDomain {
                         irq,
                         id: id as u64,
                         trigger,
+                        cpu,
                     };
                     irqs.push(irq);
                 }
@@ -667,6 +683,7 @@ impl ProtectionDomain {
             passive,
             stack_size,
             smc,
+            cpu,
             program_image: program_image.unwrap(),
             maps,
             irqs,
@@ -728,7 +745,7 @@ impl VirtualMachine {
             let child_name = child.tag_name().name();
             match child_name {
                 "vcpu" => {
-                    check_attributes(xml_sdf, &child, &["id"])?;
+                    check_attributes(xml_sdf, &child, &["id", "cpu"])?;
                     let id = checked_lookup(xml_sdf, &child, "id")?
                         .parse::<u64>()
                         .unwrap();
@@ -752,7 +769,18 @@ impl VirtualMachine {
                         }
                     }
 
-                    vcpus.push(VirtualCpu { id });
+                    let cpu = if let Some(xml_cpu) = node.attribute("cpu") {
+                        sdf_parse_number(xml_cpu, node)?
+                    } else {
+                        // Default to CPU 0, the boot CPU
+                        0
+                    };
+
+                    if cpu >= config.cores {
+                        return Err(value_error(xml_sdf, node, format!("cpu given '{}' is invalid, platform is configured with '{}' CPUs", cpu, config.cores)))
+                    }
+
+                    vcpus.push(VirtualCpu { id, cpu });
                 }
                 "map" => {
                     // Virtual machines do not have program images and so we do not allow
