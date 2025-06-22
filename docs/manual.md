@@ -4,7 +4,7 @@
 -->
 
 ---
-title: Microkit User Manual (v1.4.1-dev)
+title: Microkit User Manual (v2.0.1-dev)
 documentclass: article
 classoption:
 - english
@@ -86,6 +86,8 @@ The [Board Support Packages](#bsps) chapter describes each of the board support 
 
 The [Rationale](#rationale) chapter documents the rationale for some of the key design choices of in Microkit.
 
+The [Internals](#internals) chapter documents some of the internal details for how Microkit works.
+
 # Concepts {#concepts}
 
 This chapter describes the key concepts provided by Microkit.
@@ -131,11 +133,17 @@ A process on a typical operating system will have a `main` function which is inv
 When the `main` function returns the process is destroyed.
 
 By comparison a protection domain has up to four entry points:
+
 * `init`, `notified` which are required.
 * `protected` which is optional.
 *  `fault` which is required if the PD has children.
 
 When a Microkit system is booted, all PDs in the system execute the `init` entry point.
+
+A PD will not execute any other entry point until `init` has finished.
+
+If a PD is currently executing an entry point, it will not execute any other entry point
+until the current entry point has finished.
 
 The `notified` entry point will be invoked whenever the protection domain receives a *notification* on a *channel*.
 The `protected` entry point is invoked when a PD's *protected procedure* is called by another PD.
@@ -163,7 +171,7 @@ The PD has a number of scheduling attributes that are configured in the system d
 The budget and period bound the fraction of CPU time that a PD can consume.
 Specifically, the **budget** specifies the amount of time for which the PD is allowed to execute.
 Once the PD has consumed its budget, it is no longer runnable until the budget is replenished; replenishment happens once every **period** and resets the budget to its initial value.
-This means that the maximum fraction of CPU time the PD can consume is budget/period.
+This means that the maximum fraction of CPU time the PD can consume is $\frac{budget}{period}$.
 
 The budget cannot be larger than the period.
 A budget that equals the period (aka. a "full" budget) behaves like a traditional time slice: After executing for a full period, the PD is preempted and put at the end of the scheduling queue of its priority. In other words, PDs with equal priorities and full budgets are scheduled round-robin with a time slice defined by the period.
@@ -171,9 +179,9 @@ A budget that equals the period (aka. a "full" budget) behaves like a traditiona
 The **priority** determines which of the runnable PDs to schedule. A PD is runnable if one of its entry points has been invoked and it has budget remaining in the current period.
 Runnable PDs of the same priority are scheduled in a round-robin manner.
 
-The **passive** determines whether the PD is passive. A passive PD will have its scheduling context revoked after initialisation and then bound instead to the PD's notification object. This means the PD will be scheduled on receiving a notification, whereby it will run on the notification's scheduling context. When the PD receives a *protected procedure* by another PD or a *fault* caused by a child PD, the passive PD will run on the scheduling context of the callee.
+**Passive** determines whether the PD is passive. A passive PD will have its scheduling context revoked after initialisation and then bound instead to the PD's notification object. This means the PD will be scheduled on receiving a notification, whereby it will run on the notification's scheduling context. When the PD receives a *protected procedure* by another PD or a *fault* caused by a child PD, the passive PD will run on the scheduling context of the callee.
 
-## Virtual Machine {#vm}
+## Virtual Machines {#vm}
 
 A *virtual machine* (VM) is a runtime abstraction for running guest operating systems in Microkit. It is similar
 to a protection domain in that it provides a thread of control that executes within an isolated virtual address space.
@@ -241,7 +249,7 @@ Similarly, **B** can refer to **A** via the channel identifier **42**.
 
 The system supports a maximum of 63 channels and interrupts per protection domain.
 
-### Protected procedure {#pp}
+### Protected procedures {#pp}
 
 A protection domain may provide a *protected procedure* (PP) which can be invoked from another protection domain.
 Up to 64 words of data may be passed as arguments when calling a protected procedure.
@@ -271,10 +279,10 @@ A *message* structure is returned from this function.
 When a PD's protected procedure is invoked, the `protected` entry point is invoked with the channel identifier and message structure passed as arguments.
 The `protected` entry point must return a message structure.
 
-### Notification {#notification}
+### Notifications {#notification}
 
 A notification is a (binary) semaphore-like synchronisation mechanism.
-A PD can *notify* another PD to indicate availability of data in a shared memory region if they share a channel.
+For example, a PD can *notify* another PD to indicate availability of data in a shared memory region if they share a channel.
 
 To notify another PD, a PD calls `microkit_notify`, passing the channel identifier.
 When a PD receives a notification, the `notified` entry point is invoked with the appropriate channel identifier passed as an argument.
@@ -285,7 +293,12 @@ Unlike protected procedures, notifications can be sent in either direction on a 
 If a PD notifies another PD, that PD will become scheduled to run (if it is not already), but the current PD does **not** block.
 Of course, if the notified PD has a higher priority than the current PD, then the current PD will be preempted (but not blocked) by the other PD.
 
-## Interrupt {#irq}
+Depending on the scheduling, one PD could notify another multiple times without it being scheduled, resulting
+in a single execution of the `notified` entry point. For example, if PD A notifies PD B three times on the
+same channel without PD B ever executing, once PD B is scheduled it would only see one notification and hence
+only enter `notified` once for that channel.
+
+## Interrupts {#irq}
 
 Hardware interrupts can be used to notify a protection domain.
 The system description specifies if a protection domain receives notifications for any hardware interrupt sources.
@@ -299,17 +312,21 @@ Microkit does not provides timers, nor any *sleep* API.
 After initialisation, activity in the system is initiated by an interrupt causing a `notified` entry point to be invoked.
 That notified function may in turn notify or call other protection domains that cause other system activity, but eventually all activity indirectly initiated from that interrupt will complete, at which point the system is inactive again until another interrupt occurs.
 
-## Fault {#fault}
+## Faults {#fault}
 
 Faults such as an invalid memory access or illegal instruction are delivered to the seL4 kernel which then forwards them to
-a designated 'fault handler'. By default, all faults caused by protection domains go to the system fault handler which simply prints out
-details about the fault in a debug configuration.
+a designated 'fault handler'. By default, all faults caused by protection domains go to the system fault handler which
+simply prints out details about the fault in a debug configuration.
 
 When a protection domain is a child of another protection domain, the designated fault handler for the child is the parent
 protection domain. The same applies for a virtual machine.
 
 This means that whenever a fault is caused by a child, it will be delivered to the parent PD instead of the system fault
 handler via the `fault` entry point. It is then up to the parent to decide how the fault is handled.
+
+The default system fault handler (aka the monitor) has the highest priority and so will
+execute and handle faults immediately after they occur. For child PDs that have their faults
+delivered to another PD, the fault being handled depends on when the parent PD is scheduled.
 
 # SDK {#sdk}
 
@@ -359,7 +376,7 @@ and is intended to be removed once [RFC-16 is implemented](https://github.com/se
 
 ## System Requirements
 
-The Microkit tool requires Linux (x86-64), macOS (x86-64 or AArch64).
+The Microkit tool requires Linux (x86-64 or AArch64), macOS (x86-64 or AArch64).
 
 On Linux, the Microkit tool is statically linked and should run on any distribution.
 
@@ -784,6 +801,54 @@ A custom version of OpenSBI is required. It can be found
 [here](https://github.com/pulp-platform/opensbi/tree/cheshire).
 Build the firmware payload using platform `fpga/cheshire`.
 
+### Using U-Boot
+
+With a system pre-configured with the Cheshire ZSBL, OpenSBI and U-boot:
+
+    => go 0x90000000
+
+### Raw systerm with no bootloader
+
+Without any firmware present on the SD card, it is still possible to boot Cheshire with a Microkit system.
+
+Using a GDB prompt via openOCD:
+
+1. Reset board
+
+    => monitor reset halt
+
+2. Load a device tree blob (DTS available in Cheshire repo or seL4) to memory and set the a0 and a1 registers to point at it:
+
+    > restore /path/to/cheshire.dtb binary 0xa0000000
+
+(tell OpenSBI where DTB is)
+
+    > set $a0=0xa0000000
+
+(tell OpenSBI that the default hart is #0)
+
+    > set $a1=0
+
+3. Load OpenSBI
+
+    > load /path/to/opensbi/fw_payload.elf
+
+4. Allow OpenSBI to boot, and interrupt it once the line `Test payload running` is emitted on serial.
+
+    > continue
+
+(wait for output)
+
+    > (Ctrl+C)
+
+5. Load Microkit image and execute
+
+    > restore /path/to/loader.img binary 0x90000000
+
+(execute)
+
+    > continue
+
 ## i.MX8MM-EVK
 
 Microkit produces a raw binary file, so when using U-Boot you must execute the image using:
@@ -980,10 +1045,6 @@ When debugging is enabled the kernel will use the same UART as U-Boot.
 
 ## ZCU102
 
-Initial support is available for the Xilinx ZCU102.
-
-**FIXME:** Additional documentation required here.
-
 The ZCU102 can run on a physical board or on an appropriate QEMU based emulator.
 
 Microkit produces a raw binary file, so when using U-Boot you must execute the image using:
@@ -1011,53 +1072,6 @@ You can see that when using the `go` command, U-Boot is
 
 To avoid this behaviour, the call to `armv8_switch_to_el1` should be replaced with
 `armv8_switch_to_el2` in this `do_go_exec` function.
-
-### Using U-Boot
-
-With a system pre-configured with the Cheshire ZSBL, OpenSBI and U-boot:
-
-    => go 0x90000000
-
-### Raw systerm with no bootloader
-
-Without any firmware present on the SD card, it is still possible to boot Cheshire with a Microkit system.
-
-Using a GDB prompt via openOCD:
-
-1. Reset board
-    > monitor reset halt
-
-2. Load a device tree blob (DTS available in Cheshire repo or seL4) to memory and set the a0 and a1 registers to point at it:
-
-    > restore /path/to/cheshire.dtb binary 0xa0000000
-
-(tell OpenSBI where DTB is)
-
-    > set $a0=0xa0000000
-
-(tell OpenSBI that the default hart is #0)
-
-    > set $a1=0
-
-3. Load OpenSBI
-
-    > load /path/to/opensbi/fw_payload.elf
-
-4. Allow OpenSBI to boot, and interrupt it once the line `Test payload running` is emitted on serial.
-
-    > continue
-
-(wait for output)
-
-    > (Ctrl+C)
-
-5. Load Microkit image and execute
-
-    > restore /path/to/loader.img binary 0x90000000
-
-(execute)
-
-    > continue
 
 ## Adding Platform Support
 
@@ -1142,3 +1156,121 @@ Based on experience with the system and the types of systems being built it is p
 The limitation on the number of channels for a protection domain is based on the size of the notification word in seL4.
 Changing this to be larger than 64 would most likely require changes to seL4. The reason for why the limit is not a
 power of two is due to part of the notification word being for internal libmicrokit use.
+
+# Internals
+
+The following section describes internal details for how the Microkit works
+and all the components of Microkit. As a user of Microkit, it is not necessary
+know this information, however, there is no harm in having a greater
+understanding of the tools that you are using.
+
+![Microkit flow](assets/microkit_flow.pdf)
+
+The diagram above aims to show the general flow of a Microkit system from
+build-time to run-time.
+
+The user provides the SDF (System Description File) and the ELFs that
+correspond to PD program images to the Microkit tool which is responsible to
+for packaging everything together into a single bootable image for the target
+platform.
+
+This final image contains a couple different things:
+
+* the Microkit loader
+* seL4
+* the Monitor (and associated invocation data)
+* the images for all the user's PDs
+
+When booting the image, the Microkit loader starts, jumps to the kernel, which
+starts the monitor, which then sets up the entire system and starts all the PDs.
+
+Now, we will go into a bit more detail about each of these stages of the
+booting process as well as what exactly the Microkit tool is doing.
+
+## Loader
+
+The loader starts first, it has two main jobs:
+
+1. Unpack all the parts of the system (kernel, monitor, PD images, etc) into
+   their expected locations within main memory.
+2. Finish initialising the hardware such that the rest of the system can start.
+
+Unpacking the system image is fairly straight-forward, as all the information
+about what parts of the system image need to go where is figured out by the
+tool and embedded into the loader at build-time so when it starts it just goe
+through an array and copies data into the right locations.
+
+Before the Microkit loader starts, there would most likely have been some other
+bootloader such as U-Boot or firmware on the target that did its own hardware
+initialisation before starting Microkit.
+
+However, there are certain things that seL4 expects to be initialised
+that will not be done by a previous booting stage, such as:
+
+* changing to the right exception level
+* enabling the MMU (seL4 expects the MMU to be on when it starts)
+* interrupt controller setup
+
+Once this is all completed, the loader jumps to seL4 which starts executing.
+The loader will never be executed again.
+
+## Monitor
+
+Once the kernel has done its own initialisation, it will begin the
+'initial task'. On seL4, this is a thread that contains all the initial
+capabilities to resources that are used to setup the rest of the system.
+
+Within a Microkit environment, we call the initial task the 'monitor'.
+
+The monitor has two main jobs:
+
+1. Setup all system resources (memory regions, channels, interrupts) and start
+   the user's protection domains.
+2. Receive any faults caused by protection domains crashing or causing
+   exceptions.
+
+At build-time, the Microkit tool embeds all the system calls that the monitor
+needs to make in order to setup the user's system. More details about *how*
+this is done is in the section on the Microkit tool below. But from the
+monitor's perspective, it just iterates over an array of system calls to make
+and performs each one.
+
+After the system has been setup, the monitor goes to sleep and waits for any
+faults from protection domains. On debug mode, this results in a message about
+which PD caused an exception and details on the PD's state at the time of the fault.
+
+Other than printing fault details, the monitor does not do anything to handle
+the fault, it will simply go back to sleep waiting for any other faults.
+
+## libmicrokit
+
+Unlike the previous sections, libmicrokit is not its own program but it is worth
+a mention since it makes up the core of each protection domain in a system.
+
+When each PD starts, we enter libmicrokit's starting point which does some initial
+setup and calls the `init` entry point specified by the user. Once that completes,
+the PD will enter libmicrokit's event handler which sleeps until it receives events.
+
+These events could be notifies (from other PDs or from an interrupt), PPCs, and faults.
+For each event, the appropriate user-specified entry point is called and then when it
+returns the PD goes back to sleep, waiting on any more events.
+
+## Microkit tool
+
+The Microkit tool's ultimate job is to take in the description of the user's system,
+the SDF, and convert into an seL4 system that boots and executes.
+
+There are obvious steps such as parsing the SDF and PD ELFs but the majority of
+the work done by the tool is converting the system description into a list of
+seL4 system calls that need to happen.
+
+In order to do this however, the Microkit tool needs to perform o a decent amount of
+'emulation' to know exactly what system calls and with which arguments to make.
+This requires keeping track of what memory is allocated and where, the layout of
+each capability space, what the initial untypeds list will look like, etc.
+
+While this is non-trivial to do, it comes with the useful property that if the tool
+produces a valid image, there should be no errors upon initialising the system
+If there are any errors with configuring the system (e.g running out of memory),
+they will be caught at build-time. This can only reasonably be done due to the
+static-architecture of Microkit systems.

@@ -57,6 +57,7 @@ struct region {
 
 struct loader_data {
     uintptr_t magic;
+    uintptr_t size;
     uintptr_t flags;
     uintptr_t kernel_entry;
     uintptr_t ui_p_reg_start;
@@ -80,6 +81,44 @@ typedef void (*sel4_entry)(
     uintptr_t extra_device_addr_p,
     uintptr_t extra_device_size
 );
+
+static void *memcpy(void *dst, const void *src, size_t sz)
+{
+    char *dst_ = dst;
+    const char *src_ = src;
+    while (sz-- > 0) {
+        *dst_++ = *src_++;
+    }
+
+    return dst;
+}
+
+void *memmove(void *restrict dest, const void *restrict src, size_t n)
+{
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
+
+    /* no copying to do */
+    if (d == s) {
+        return dest;
+    }
+    /* for non-overlapping regions, just use memcpy */
+    else if (s + n <= d || d + n <= s) {
+        return memcpy(dest, src, n);
+    }
+    /* if copying from the start of s to the start of d, just use memcpy */
+    else if (s > d) {
+        return memcpy(dest, src, n);
+    }
+
+    /* copy from end of 's' to end of 'd' */
+    size_t i;
+    for (i = 1; i <= n; i++) {
+        d[n - i] = s[n - i];
+    }
+
+    return dest;
+}
 
 void switch_to_el1(void);
 void switch_to_el2(void);
@@ -111,20 +150,13 @@ extern char _text;
 extern char _bss_end;
 const struct loader_data *loader_data = (void *) &_bss_end;
 
-static void memcpy(void *dst, const void *src, size_t sz)
-{
-    char *dst_ = dst;
-    const char *src_ = src;
-    while (sz-- > 0) {
-        *dst_++ = *src_++;
-    }
-}
-
 #if defined(BOARD_tqma8xqp1gb)
 #define UART_BASE 0x5a070000
 #define STAT 0x14
 #define TRANSMIT 0x1c
 #define STAT_TDRE (1 << 23)
+
+static void uart_init() {}
 
 static void putc(uint8_t ch)
 {
@@ -136,6 +168,8 @@ static void putc(uint8_t ch)
 #define STAT 0x98
 #define TRANSMIT 0x40
 #define STAT_TDRE (1 << 14)
+
+static void uart_init() {}
 
 static void putc(uint8_t ch)
 {
@@ -171,14 +205,10 @@ static void putc(uint8_t ch)
 #define TRANSMIT 0x40
 #define STAT_TDRE (1 << 14)
 
+static void uart_init() {}
+
 static void putc(uint8_t ch)
 {
-    if (ch == '\n') {
-        // ensure FIFO has space
-        while (!(*UART_REG(STAT) & STAT_TDRE)) { }
-        *UART_REG(TRANSMIT) = '\r';
-    }
-
     // ensure FIFO has space
     while (!(*UART_REG(STAT) & STAT_TDRE)) { }
     *UART_REG(TRANSMIT) = ch;
@@ -188,6 +218,8 @@ static void putc(uint8_t ch)
 #define UART_WFIFO 0x0
 #define UART_STATUS 0xC
 #define UART_TX_FULL (1 << 21)
+
+static void uart_init() {}
 
 static void putc(uint8_t ch)
 {
@@ -200,6 +232,8 @@ static void putc(uint8_t ch)
 #define UART_STATUS 0xC
 #define UART_TX_FULL (1 << 21)
 
+static void uart_init() {}
+
 static void putc(uint8_t ch)
 {
     while ((*UART_REG(UART_STATUS) & UART_TX_FULL));
@@ -207,20 +241,32 @@ static void putc(uint8_t ch)
 }
 #elif defined(BOARD_qemu_virt_aarch64)
 #define UART_BASE                 0x9000000
-#define UARTDR                    0x000
-#define UARTFR                    0x018
+#define PL011_TCR                 0x030
+#define PL011_UARTDR              0x000
+#define PL011_UARTFR              0x018
 #define PL011_UARTFR_TXFF         (1 << 5)
+#define PL011_CR_UART_EN          (1 << 0)
+#define PL011_CR_TX_EN            (1 << 8)
+
+static void uart_init()
+{
+    /* Enable the device and transmit */
+    *UART_REG(PL011_TCR) |= (PL011_CR_TX_EN | PL011_CR_UART_EN);
+}
 
 static void putc(uint8_t ch)
 {
-    while ((*UART_REG(UARTFR) & PL011_UARTFR_TXFF) != 0);
-    *UART_REG(UARTDR) = ch;
+    while ((*UART_REG(PL011_UARTFR) & PL011_UARTFR_TXFF) != 0);
+    *UART_REG(PL011_UARTDR) = ch;
 }
+
 #elif defined(BOARD_rpi4b_1gb)
 #define UART_BASE 0xfe215040
 #define MU_IO 0x00
 #define MU_LSR 0x14
 #define MU_LSR_TXIDLE (1 << 6)
+
+static void uart_init() {}
 
 static void putc(uint8_t ch)
 {
@@ -232,6 +278,8 @@ static void putc(uint8_t ch)
 #define UTHR        0x0
 #define ULSR        0x14
 #define ULSR_THRE   (1 << 5)
+
+static void uart_init() {}
 
 static void putc(uint8_t ch)
 {
@@ -257,6 +305,11 @@ static void putc(uint8_t ch)
 
 #define SBI_CALL_1(which, arg0) SBI_CALL(which, arg0, 0, 0)
 
+static void uart_init()
+{
+    /* Nothing to do, OpenSBI will do UART init for us. */
+}
+
 static void putc(uint8_t ch)
 {
     SBI_CALL_1(SBI_CONSOLE_PUTCHAR, ch);
@@ -269,6 +322,9 @@ static void puts(const char *s)
 {
 #if PRINTING
     while (*s) {
+        if (*s == '\n') {
+            putc('\r');
+        }
         putc(*s);
         s++;
     }
@@ -650,6 +706,23 @@ static inline void enable_mmu(void)
 }
 #endif
 
+void relocation_failed(void)
+{
+    puts("LDR|ERROR: relocation failed, loader destination would overlap current loader location\n");
+    while (1);
+}
+
+void relocation_log(uint64_t reloc_addr, uint64_t curr_addr)
+{
+    /* This function is called from assembly before main so we call uart_init here as well. */
+    uart_init();
+    puts("LDR|INFO: relocating from ");
+    puthex64(curr_addr);
+    puts(" to ");
+    puthex64(reloc_addr);
+    puts("\n");
+}
+
 void disable_caches_el2(void);
 
 #if NUM_CPUS > 1
@@ -744,9 +817,7 @@ fail:
 
 int main(void)
 {
-#if defined(BOARD_zcu102)
     uart_init();
-#endif
 
     puts("LDR|INFO: altloader for seL4 starting\n");
     /* Check that the loader magic number is set correctly */

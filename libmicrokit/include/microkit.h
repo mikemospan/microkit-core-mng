@@ -31,6 +31,7 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define BASE_SCHED_CONTROL_CAP 458
 
 #define MICROKIT_MAX_CHANNELS 62
+#define MICROKIT_MAX_CHANNEL_ID (MICROKIT_MAX_CHANNELS - 1)
 #define MICROKIT_PD_NAME_LENGTH 64
 
 /* User provided functions */
@@ -44,6 +45,12 @@ extern char microkit_name[MICROKIT_PD_NAME_LENGTH];
 extern seL4_Bool microkit_have_signal;
 extern seL4_CPtr microkit_signal_cap;
 extern seL4_MessageInfo_t microkit_signal_msg;
+
+/* Symbols for error checking libmicrokit API calls. Patched by the Microkit tool
+ * to set bits corresponding to valid channels for this PD. */
+extern seL4_Word microkit_irqs;
+extern seL4_Word microkit_notifications;
+extern seL4_Word microkit_pps;
 
 /* These next 5 variables are needed to perform a `seL4_SchedControl_ConfigureFlags` call.
  * This is used to switch the CPU core a thread is running on (core-migration management). */
@@ -63,6 +70,16 @@ void microkit_dbg_putc(int c);
  */
 void microkit_dbg_puts(const char *s);
 
+/*
+ * Output the decimal representation of an 8-bit integer to the debug console.
+ */
+void microkit_dbg_put8(seL4_Uint8 x);
+
+/*
+ * Output the decimal representation of an 32-bit integer to the debug console.
+ */
+void microkit_dbg_put32(seL4_Uint32 x);
+
 static inline void microkit_internal_crash(seL4_Error err)
 {
     /*
@@ -78,11 +95,25 @@ static inline void microkit_internal_crash(seL4_Error err)
 
 static inline void microkit_notify(microkit_channel ch)
 {
+    if (ch > MICROKIT_MAX_CHANNEL_ID || (microkit_notifications & (1ULL << ch)) == 0) {
+        microkit_dbg_puts(microkit_name);
+        microkit_dbg_puts(" microkit_notify: invalid channel given '");
+        microkit_dbg_put32(ch);
+        microkit_dbg_puts("'\n");
+        return;
+    }
     seL4_Signal(BASE_OUTPUT_NOTIFICATION_CAP + ch);
 }
 
 static inline void microkit_irq_ack(microkit_channel ch)
 {
+    if (ch > MICROKIT_MAX_CHANNEL_ID || (microkit_irqs & (1ULL << ch)) == 0) {
+        microkit_dbg_puts(microkit_name);
+        microkit_dbg_puts(" microkit_irq_ack: invalid channel given '");
+        microkit_dbg_put32(ch);
+        microkit_dbg_puts("'\n");
+        return;
+    }
     seL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
 }
 
@@ -117,6 +148,13 @@ static inline void microkit_pd_stop(microkit_child pd)
 
 static inline microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginfo msginfo)
 {
+    if (ch > MICROKIT_MAX_CHANNEL_ID || (microkit_pps & (1ULL << ch)) == 0) {
+        microkit_dbg_puts(microkit_name);
+        microkit_dbg_puts(" microkit_ppcall: invalid channel given '");
+        microkit_dbg_put32(ch);
+        microkit_dbg_puts("'\n");
+        return seL4_MessageInfo_new(0, 0, 0, 0);
+    }
     return seL4_Call(BASE_ENDPOINT_CAP + ch, msginfo);
 }
 
@@ -234,6 +272,13 @@ static inline void microkit_arm_smc_call(seL4_ARM_SMCContext *args, seL4_ARM_SMC
 
 static inline void microkit_deferred_notify(microkit_channel ch)
 {
+    if (ch > MICROKIT_MAX_CHANNEL_ID || (microkit_notifications & (1ULL << ch)) == 0) {
+        microkit_dbg_puts(microkit_name);
+        microkit_dbg_puts(" microkit_deferred_notify: invalid channel given '");
+        microkit_dbg_put32(ch);
+        microkit_dbg_puts("'\n");
+        return;
+    }
     microkit_have_signal = seL4_True;
     microkit_signal_msg = seL4_MessageInfo_new(0, 0, 0, 0);
     microkit_signal_cap = (BASE_OUTPUT_NOTIFICATION_CAP + ch);
@@ -241,6 +286,13 @@ static inline void microkit_deferred_notify(microkit_channel ch)
 
 static inline void microkit_deferred_irq_ack(microkit_channel ch)
 {
+    if (ch > MICROKIT_MAX_CHANNEL_ID || (microkit_irqs & (1ULL << ch)) == 0) {
+        microkit_dbg_puts(microkit_name);
+        microkit_dbg_puts(" microkit_deferred_irq_ack: invalid channel given '");
+        microkit_dbg_put32(ch);
+        microkit_dbg_puts("'\n");
+        return;
+    }
     microkit_have_signal = seL4_True;
     microkit_signal_msg = seL4_MessageInfo_new(IRQAckIRQ, 0, 0, 0);
     microkit_signal_cap = (BASE_IRQ_CAP + ch);

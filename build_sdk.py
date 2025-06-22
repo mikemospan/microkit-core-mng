@@ -26,7 +26,6 @@ import json
 from typing import Any, Dict, Union, List, Tuple, Optional
 
 NAME = "microkit"
-VERSION = "1.4.1"
 
 ENV_BIN_DIR = Path(executable).parent
 
@@ -254,7 +253,7 @@ SUPPORTED_BOARDS = (
         name="qemu_virt_riscv64",
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
-        loader_link_address=0x80200000,
+        loader_link_address=0x90000000,
         kernel_options={
             "KernelPlatform": "qemu-riscv-virt",
             "KernelIsMCS": True,
@@ -393,7 +392,13 @@ def tar_filter(tarinfo: TarInfo) -> TarInfo:
 def get_tool_target_triple() -> str:
     host_system = host_platform.system()
     if host_system == "Linux":
-        return "x86_64-unknown-linux-musl"
+        host_arch = host_platform.machine()
+        if host_arch == "x86_64":
+            return "x86_64-unknown-linux-musl"
+        elif host_arch == "aarch64":
+            return "aarch64-unknown-linux-musl"
+        else:
+            raise Exception(f"Unexpected Linux architecture: {host_arch}")
     elif host_system == "Darwin":
         host_arch = host_platform.machine()
         if host_arch == "x86_64":
@@ -560,8 +565,8 @@ def build_elf_component(
 def build_doc(root_dir: Path):
     output = root_dir / "doc" / "microkit_user_manual.pdf"
 
-    environ["TEXINPUTS"] = "docs/style:"
-    r = system(f'pandoc docs/manual.md -o {output}')
+    environ["TEXINPUTS"] = "style:"
+    r = system(f'cd docs && pandoc manual.md -o ../{output}')
     assert r == 0
 
 
@@ -574,7 +579,7 @@ def build_lib_component(
 ) -> None:
     """Build a specific library component.
 
-    Right now this is just libsel4.a
+    Right now this is just libmicrokit.a
     """
     sel4_dir = root_dir / "board" / board.name / config.name
     build_dir = build_dir / board.name / config.name / component_name
@@ -631,7 +636,11 @@ def main() -> None:
     parser.add_argument("--skip-sel4", action="store_true", help="seL4 will not be built")
     parser.add_argument("--skip-docs", action="store_true", help="Docs will not be built")
     parser.add_argument("--skip-tar", action="store_true", help="SDK and source tarballs will not be built")
-    parser.add_argument("--version", default=VERSION, help="SDK version")
+    # Read from the version file as unless someone has specified
+    # a version, that is the source of truth
+    with open("VERSION", "r") as f:
+        default_version = f.read().strip()
+    parser.add_argument("--version", default=default_version, help="SDK version")
     for arch in KernelArch:
         arch_str = arch.name.lower()
         parser.add_argument(f"--toolchain-prefix-{arch_str}", default=arch.c_toolchain(), help=f"C toolchain prefix when compiling for {arch_str}, e.g {arch_str}-none-elf")

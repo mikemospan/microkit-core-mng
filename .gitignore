@@ -16,3 +16,4 @@ target/
 *.orig
 .DS_Store
 .vscode/
+*.pdf

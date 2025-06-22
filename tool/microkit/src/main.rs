@@ -10,12 +10,13 @@
 use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::{
-    elf, loader, sdf, sel4, util, DisjointMemoryRegion, MemoryRegion, ObjectAllocator, Region,
-    UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
+    elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
+    ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
+    VM_MAX_NAME_LENGTH,
 };
 use sdf::{
-    parse, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription,
-    VirtualMachine,
+    parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
+    SystemDescription, VirtualMachine,
 };
 use sel4::{
     default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
@@ -30,7 +31,7 @@ use std::iter::zip;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use util::{
-    comma_sep_u64, comma_sep_usize, json_str, json_str_as_bool, json_str_as_u64,
+    comma_sep_u64, comma_sep_usize, human_size_strict, json_str, json_str_as_bool, json_str_as_u64,
     monitor_serialise_names, monitor_serialise_u64_vec, struct_to_bytes,
 };
 
@@ -118,35 +119,15 @@ impl MonitorConfig {
     }
 }
 
-#[derive(Debug)]
-struct FixedUntypedAlloc {
-    ut: UntypedObject,
-    watermark: u64,
-}
-
-impl FixedUntypedAlloc {
-    pub fn new(ut: UntypedObject) -> FixedUntypedAlloc {
-        FixedUntypedAlloc {
-            ut,
-            watermark: ut.base(),
-        }
-    }
-
-    pub fn contains(&self, addr: u64) -> bool {
-        self.ut.base() <= addr && addr < self.ut.end()
-    }
-}
-
 struct InitSystem<'a> {
     config: &'a Config,
     cnode_cap: u64,
     cnode_mask: u64,
-    kao: &'a mut ObjectAllocator,
     invocations: &'a mut Vec<Invocation>,
     cap_slot: u64,
     last_fixed_address: u64,
-    normal_untyped: Vec<FixedUntypedAlloc>,
-    device_untyped: Vec<FixedUntypedAlloc>,
+    normal_untyped: &'a mut ObjectAllocator,
+    device_untyped: &'a mut ObjectAllocator,
     cap_address_names: &'a mut HashMap<u64, String>,
     objects: Vec<Object>,
 }
@@ -158,42 +139,15 @@ impl<'a> InitSystem<'a> {
         cnode_cap: u64,
         cnode_mask: u64,
         first_available_cap_slot: u64,
-        kernel_object_allocator: &'a mut ObjectAllocator,
-        kernel_boot_info: &'a BootInfo,
+        normal_untyped: &'a mut ObjectAllocator,
+        device_untyped: &'a mut ObjectAllocator,
         invocations: &'a mut Vec<Invocation>,
         cap_address_names: &'a mut HashMap<u64, String>,
     ) -> InitSystem<'a> {
-        let mut device_untyped: Vec<FixedUntypedAlloc> = kernel_boot_info
-            .untyped_objects
-            .iter()
-            .filter_map(|ut| {
-                if ut.is_device {
-                    Some(FixedUntypedAlloc::new(*ut))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        device_untyped.sort_by(|a, b| a.ut.base().cmp(&b.ut.base()));
-
-        let mut normal_untyped: Vec<FixedUntypedAlloc> = kernel_boot_info
-            .untyped_objects
-            .iter()
-            .filter_map(|ut| {
-                if !ut.is_device {
-                    Some(FixedUntypedAlloc::new(*ut))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        normal_untyped.sort_by(|a, b| a.ut.base().cmp(&b.ut.base()));
-
         InitSystem {
             config,
             cnode_cap,
             cnode_mask,
-            kao: kernel_object_allocator,
             invocations,
             cap_slot: first_available_cap_slot,
             last_fixed_address: 0,
@@ -205,29 +159,8 @@ impl<'a> InitSystem<'a> {
     }
 
     pub fn reserve(&mut self, allocations: Vec<(&UntypedObject, u64)>) {
-        for (alloc_ut, alloc_phys_addr) in allocations {
-            let mut found = false;
-            for fut in &mut self.device_untyped {
-                if *alloc_ut == fut.ut {
-                    if fut.ut.base() <= alloc_phys_addr && alloc_phys_addr <= fut.ut.end() {
-                        fut.watermark = alloc_phys_addr;
-                        found = true;
-                        break;
-                    } else {
-                        panic!(
-                            "Allocation {:?} ({:x}) not in untyped region {:?}",
-                            alloc_ut, alloc_phys_addr, fut.ut.region
-                        );
-                    }
-                }
-            }
-
-            if !found {
-                panic!(
-                    "Allocation {:?} ({:x}) not in any device untyped",
-                    alloc_ut, alloc_phys_addr
-                );
-            }
+        for alloc in allocations {
+            self.device_untyped.reserve(alloc);
         }
     }
 
@@ -242,86 +175,55 @@ impl<'a> InitSystem<'a> {
         assert!(object_type.fixed_size(self.config).is_some());
 
         let alloc_size = object_type.fixed_size(self.config).unwrap();
-        // Find an untyped that contains the given address, it may be in device
-        // memory
-        let device_fut: Option<&mut FixedUntypedAlloc> = self
-            .device_untyped
-            .iter_mut()
-            .find(|fut| fut.contains(phys_address));
 
-        let normal_fut: Option<&mut FixedUntypedAlloc> = self
-            .normal_untyped
-            .iter_mut()
-            .find(|fut| fut.contains(phys_address));
+        // Find an untyped that contains the given address, it could either be
+        // in device memory or normal memory.
+        let device_ut = self.device_untyped.find_fixed(phys_address, alloc_size).unwrap_or_else(|err| {
+            match err {
+                FindFixedError::AlreadyAllocated => eprintln!("ERROR: attempted to allocate object '{}' at 0x{:x} from reserved region, pick another physical address", name, phys_address),
+                FindFixedError::TooLarge => eprintln!("ERROR: attempted too allocate too large of an object '{}' for this physical address 0x{:x}", name, phys_address),
+            }
+            std::process::exit(1);
+        });
+        let normal_ut = self.normal_untyped.find_fixed(phys_address, alloc_size).unwrap_or_else(|err| {
+            match err {
+                FindFixedError::AlreadyAllocated => eprintln!("ERROR: attempted to allocate object '{}' at 0x{:x} from reserved region, pick another physical address", name, phys_address),
+                FindFixedError::TooLarge => eprintln!("ERROR: attempted too allocate too large of an object '{}' for this physical address 0x{:x}", name, phys_address),
+            }
+            std::process::exit(1);
+        });
 
         // We should never have found the physical address in both device and normal untyped
-        assert!(!(device_fut.is_some() && normal_fut.is_some()));
+        assert!(!(device_ut.is_some() && normal_ut.is_some()));
 
-        let fut = if let Some(fut) = device_fut {
-            fut
-        } else if let Some(fut) = normal_fut {
-            fut
+        let (padding, ut) = if let Some(x) = device_ut {
+            x
+        } else if let Some(x) = normal_ut {
+            x
         } else {
-            panic!(
-                "Error: physical address {:x} not in any device untyped",
+            eprintln!(
+                "ERROR: physical address 0x{:x} not in any valid region, below are the valid ranges of memory to be allocated from:",
                 phys_address
-            )
+            );
+            eprintln!("valid ranges outside of main memory:");
+            for ut in &self.device_untyped.untyped {
+                eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
+            }
+            eprintln!("valid ranges within main memory:");
+            for ut in &self.normal_untyped.untyped {
+                eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
+            }
+            std::process::exit(1);
         };
 
-        let space_left = fut.ut.region.end - fut.watermark;
-        if space_left < alloc_size {
-            for ut in &self.device_untyped {
-                let space_left = ut.ut.region.end - ut.watermark;
-                println!(
-                    "ut [0x{:x}..0x{:x}], space left: 0x{:x}",
-                    ut.ut.region.base, ut.ut.region.end, space_left
-                );
-            }
-            panic!(
-                "Error: allocation for physical address {:x} is too large ({:x}) for untyped",
-                phys_address, alloc_size
-            );
-        }
-
-        if phys_address < fut.watermark {
-            panic!(
-                "Error: physical address {:x} is below watermark",
-                phys_address
-            );
-        }
-
-        if fut.watermark != phys_address {
-            // If the watermark isn't at the right spot, then we need to
-            // create padding objects until it is.
-            let mut padding_required = phys_address - fut.watermark;
-            // We are restricted in how much we can pad:
-            // 1: Untyped objects must be power-of-two sized.
-            // 2: Untyped objects must be aligned to their size.
-            let mut padding_sizes = Vec::new();
-            // We have two potential approaches for how we pad.
-            // 1: Use largest objects possible respecting alignment
-            // and size restrictions.
-            // 2: Use a fixed size object multiple times. This will
-            // create more objects, but as same sized objects can be
-            // create in a batch, required fewer invocations.
-            // For now we choose #1
-            let mut wm = fut.watermark;
-            while padding_required > 0 {
-                let wm_lsb = util::lsb(wm);
-                let sz_msb = util::msb(padding_required);
-                let pad_obejct_size = 1 << min(wm_lsb, sz_msb);
-                padding_sizes.push(pad_obejct_size);
-                wm += pad_obejct_size;
-                padding_required -= pad_obejct_size;
-            }
-
-            for sz in padding_sizes {
+        if let Some(padding_unwrapped) = padding {
+            for pad_ut in padding_unwrapped {
                 self.invocations.push(Invocation::new(
                     self.config,
                     InvocationArgs::UntypedRetype {
-                        untyped: fut.ut.cap,
+                        untyped: pad_ut.untyped_cap_address,
                         object_type: ObjectType::Untyped,
-                        size_bits: sz.ilog2() as u64,
+                        size_bits: pad_ut.size.ilog2() as u64,
                         root: self.cnode_cap,
                         node_index: 1,
                         node_depth: 1,
@@ -338,7 +240,7 @@ impl<'a> InitSystem<'a> {
         self.invocations.push(Invocation::new(
             self.config,
             InvocationArgs::UntypedRetype {
-                untyped: fut.ut.cap,
+                untyped: ut.untyped_cap_address,
                 object_type,
                 size_bits: 0,
                 root: self.cnode_cap,
@@ -349,7 +251,6 @@ impl<'a> InitSystem<'a> {
             },
         ));
 
-        fut.watermark = phys_address + alloc_size;
         self.last_fixed_address = phys_address + alloc_size;
         let cap_addr = self.cnode_mask | object_cap;
         let kernel_object = Object {
@@ -387,12 +288,27 @@ impl<'a> InitSystem<'a> {
             let sz = size.unwrap();
             assert!(util::is_power_of_two(sz));
             api_size = sz.ilog2() as u64;
-            alloc_size = sz * SLOT_SIZE;
+            if object_type == ObjectType::CNode {
+                alloc_size = sz * SLOT_SIZE;
+            } else {
+                alloc_size = sz;
+            }
         } else {
             panic!("Internal error: invalid object type: {:?}", object_type);
         }
 
-        let allocation = self.kao.alloc_n(alloc_size, count);
+        let allocation = self.normal_untyped
+                             .alloc_n(alloc_size, count)
+                             .unwrap_or_else(|| {
+                                    let (human_size, human_size_label) = human_size_strict(alloc_size * count);
+                                    let (human_max_alloc, human_max_alloc_label) = human_size_strict(self.normal_untyped.max_alloc_size());
+                                    eprintln!("ERROR: failed to allocate objects for '{}' of object type '{}'", names[0], object_type.to_str());
+                                    if alloc_size * count > self.normal_untyped.max_alloc_size() {
+                                        eprintln!("ERROR: allocation size ({} {}) is greater than current maximum size for a single allocation ({} {})", human_size, human_size_label, human_max_alloc, human_max_alloc_label);
+                                    }
+                                    std::process::exit(1);
+                                }
+                             );
         let base_cap_slot = self.cap_slot;
         self.cap_slot += count;
 
@@ -464,6 +380,7 @@ struct BuiltSystem {
 
 pub fn pd_write_symbols(
     pds: &[ProtectionDomain],
+    channels: &[Channel],
     pd_elf_files: &mut [ElfFile],
     pd_setvar_values: &[Vec<u64>],
 ) -> Result<(), String> {
@@ -473,6 +390,30 @@ pub fn pd_write_symbols(
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf.write_symbol("microkit_name", &name[..name_length])?;
         elf.write_symbol("microkit_passive", &[pd.passive as u8])?;
+        let mut notification_bits: u64 = 0;
+        let mut pp_bits: u64 = 0;
+        for channel in channels {
+            if channel.end_a.pd == i {
+                if channel.end_a.notify {
+                    notification_bits |= 1 << channel.end_a.id;
+                }
+                if channel.end_a.pp {
+                    pp_bits |= 1 << channel.end_a.id;
+                }
+            }
+            if channel.end_b.pd == i {
+                if channel.end_b.notify {
+                    notification_bits |= 1 << channel.end_b.id;
+                }
+                if channel.end_b.pp {
+                    pp_bits |= 1 << channel.end_b.id;
+                }
+            }
+        }
+
+        elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
+        elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
 
         elf.write_symbol("microkit_pd_period", &pd.period.to_le_bytes())?;
         elf.write_symbol("microkit_pd_budget", &pd.budget.to_le_bytes())?;
@@ -893,7 +834,21 @@ fn build_system(
     }
 
     // The kernel boot info allows us to create an allocator for kernel objects
-    let mut kao = ObjectAllocator::new(&kernel_boot_info);
+    let mut kao = ObjectAllocator::new(
+        kernel_boot_info
+            .untyped_objects
+            .iter()
+            .filter(|ut| !ut.is_device)
+            .collect::<Vec<_>>(),
+    );
+
+    let mut kad = ObjectAllocator::new(
+        kernel_boot_info
+            .untyped_objects
+            .iter()
+            .filter(|ut| ut.is_device)
+            .collect::<Vec<_>>(),
+    );
 
     // 2. Now that the available resources are known it is possible to proceed with the
     // monitor task boot strap.
@@ -931,13 +886,17 @@ fn build_system(
     //  slot 0: the existing init cnode
     //  slot 1: our main system cnode
     let root_cnode_bits = 1;
-    let root_cnode_allocation = kao.alloc((1 << root_cnode_bits) * (1 << SLOT_BITS));
+    let root_cnode_allocation = kao
+        .alloc((1 << root_cnode_bits) * (1 << SLOT_BITS))
+        .unwrap_or_else(|| panic!("Internal error: failed to allocate root CNode"));
     let root_cnode_cap = kernel_boot_info.first_available_cap;
     cap_address_names.insert(root_cnode_cap, "CNode: root".to_string());
 
     // 2.1.2: Allocate the *system* CNode. It is the cnodes that
     // will have enough slots for all required caps.
-    let system_cnode_allocation = kao.alloc(system_cnode_size * (1 << SLOT_BITS));
+    let system_cnode_allocation = kao
+        .alloc(system_cnode_size * (1 << SLOT_BITS))
+        .unwrap_or_else(|| panic!("Internal erorr: failed to allocate system CNode"));
     let system_cnode_cap = kernel_boot_info.first_available_cap + 1;
     cap_address_names.insert(system_cnode_cap, "CNode: system".to_string());
 
@@ -1116,7 +1075,9 @@ fn build_system(
     let page_table_size = ObjectType::PageTable.fixed_size(config).unwrap();
     let page_tables_required =
         util::round_up(invocation_table_size, large_page_size) / large_page_size;
-    let page_table_allocation = kao.alloc_n(page_table_size, page_tables_required);
+    let page_table_allocation = kao
+        .alloc_n(page_table_size, page_tables_required)
+        .unwrap_or_else(|| panic!("Internal error: failed to allocate page tables"));
     let base_page_table_cap = cap_slot;
 
     for pta in base_page_table_cap..base_page_table_cap + page_tables_required {
@@ -1258,6 +1219,7 @@ fn build_system(
                 page_count: aligned_size / PageSize::Small as u64,
                 phys_addr: Some(phys_addr_next),
                 text_pos: None,
+                kind: SysMemoryRegionKind::Elf,
             };
             phys_addr_next += aligned_size;
 
@@ -1294,6 +1256,7 @@ fn build_system(
             page_count: pd.stack_size / PageSize::Small as u64,
             phys_addr: None,
             text_pos: None,
+            kind: SysMemoryRegionKind::Stack,
         };
 
         let stack_map = SysMap {
@@ -1327,14 +1290,49 @@ fn build_system(
         system_cap_address_mask,
         cap_slot,
         &mut kao,
-        &kernel_boot_info,
+        &mut kad,
         &mut system_invocations,
         &mut cap_address_names,
     );
 
     init_system.reserve(invocation_table_allocations);
+    let mut mr_pages: HashMap<&SysMemoryRegion, Vec<Object>> = HashMap::new();
 
-    // 3.1 Work out how many regular (non-fixed) page objects are required
+    // 3.1 Work out how many fixed page objects are required
+
+    // First we need to find all the requested pages and sorted them
+    let mut fixed_pages = Vec::new();
+    for mr in &all_mrs {
+        if let Some(mut phys_addr) = mr.phys_addr {
+            mr_pages.insert(mr, vec![]);
+            for _ in 0..mr.page_count {
+                fixed_pages.push((phys_addr, mr));
+                phys_addr += mr.page_size_bytes();
+            }
+        }
+    }
+
+    // Sort based on the starting physical address
+    fixed_pages.sort_by_key(|p| p.0);
+
+    // FIXME: At this point we can recombine them into
+    // groups to optimize allocation
+    for (phys_addr, mr) in fixed_pages {
+        let obj_type = match mr.page_size {
+            PageSize::Small => ObjectType::SmallPage,
+            PageSize::Large => ObjectType::LargePage,
+        };
+
+        let (page_size_human, page_size_label) = util::human_size_strict(mr.page_size as u64);
+        let name = format!(
+            "Page({} {}): MR={} @ {:x}",
+            page_size_human, page_size_label, mr.name, phys_addr
+        );
+        let page = init_system.allocate_fixed_object(phys_addr, obj_type, name);
+        mr_pages.get_mut(mr).unwrap().push(page);
+    }
+
+    // 3.2 Work out how many regular (non-fixed) page objects are required
     let mut small_page_names = Vec::new();
     let mut large_page_names = Vec::new();
 
@@ -1373,16 +1371,14 @@ fn build_system(
     // All the IPC buffers are the first to be allocated which is why this works
     let ipc_buffer_objs = &small_page_objs[..system.protection_domains.len()];
 
-    let mut mr_pages: HashMap<&SysMemoryRegion, Vec<Object>> = HashMap::new();
-
     let mut page_small_idx = ipc_buffer_objs.len();
     let mut page_large_idx = 0;
 
     for mr in &all_mrs {
         if mr.phys_addr.is_some() {
-            mr_pages.insert(mr, vec![]);
             continue;
         }
+
         let idx = match mr.page_size {
             PageSize::Small => page_small_idx,
             PageSize::Large => page_large_idx,
@@ -1396,39 +1392,6 @@ fn build_system(
             PageSize::Small => page_small_idx += mr.page_count as usize,
             PageSize::Large => page_large_idx += mr.page_count as usize,
         }
-    }
-
-    // 3.2 Now allocate all the fixed MRs
-
-    // First we need to find all the requested pages and sorted them
-    let mut fixed_pages = Vec::new();
-    for mr in &all_mrs {
-        if let Some(mut phys_addr) = mr.phys_addr {
-            for _ in 0..mr.page_count {
-                fixed_pages.push((phys_addr, mr));
-                phys_addr += mr.page_size_bytes();
-            }
-        }
-    }
-
-    // Sort based on the starting physical address
-    fixed_pages.sort_by_key(|p| p.0);
-
-    // FIXME: At this point we can recombine them into
-    // groups to optimize allocation
-    for (phys_addr, mr) in fixed_pages {
-        let obj_type = match mr.page_size {
-            PageSize::Small => ObjectType::SmallPage,
-            PageSize::Large => ObjectType::LargePage,
-        };
-
-        let (page_size_human, page_size_label) = util::human_size_strict(mr.page_size as u64);
-        let name = format!(
-            "Page({} {}): MR={} @ {:x}",
-            page_size_human, page_size_label, mr.name, phys_addr
-        );
-        let page = init_system.allocate_fixed_object(phys_addr, obj_type, name);
-        mr_pages.get_mut(mr).unwrap().push(page);
     }
 
     let virtual_machines: Vec<&VirtualMachine> = system
@@ -1817,6 +1780,45 @@ fn build_system(
         },
     );
     system_invocations.push(asid_invocation);
+
+    // Check that the user has not created any maps that clash with our extra maps
+    for pd in &system.protection_domains {
+        let curr_pd_extra_maps = &pd_extra_maps[pd];
+        for pd_map in &pd.maps {
+            for extra_map in curr_pd_extra_maps {
+                let mr = all_mr_by_name[pd_map.mr.as_str()];
+                let base = pd_map.vaddr;
+                let end = base + mr.size;
+                let extra_mr = all_mr_by_name[extra_map.mr.as_str()];
+                let extra_map_base = extra_map.vaddr;
+                let extra_map_end = extra_map_base + extra_mr.size;
+                if !(base >= extra_map_end || end <= extra_map_base) {
+                    eprintln!("ERROR: PD '{}' contains overlapping map, mapping for '{}' [0x{:x}..0x{:x}) overlaps with mapping for '{}' [0x{:x}..0x{:x})",
+                              pd.name, pd_map.mr, base, end, extra_map.mr, extra_map_base, extra_map_end);
+                    match extra_mr.kind {
+                        SysMemoryRegionKind::Elf => {
+                            eprintln!(
+                                "ERROR: mapping for '{}' would overlap with the ELF for PD '{}'",
+                                pd_map.mr, pd.name
+                            );
+                        }
+                        SysMemoryRegionKind::Stack => {
+                            eprintln!(
+                                "ERROR: mapping for '{}' would overlap with stack region or PD '{}'",
+                                pd_map.mr, pd.name
+                            );
+                        }
+                        SysMemoryRegionKind::User => {
+                            // This is not expected because there should not be any 'User' kind of MRs
+                            // in the extra maps list.
+                            panic!("internal error: did not expect to encounter user defined MR in this case");
+                        }
+                    }
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 
     // Create copies of all caps required via minting.
 
@@ -2761,6 +2763,8 @@ fn build_system(
             },
         ));
     }
+    // AArch64 and RISC-V expect the stack pointer to be 16-byte aligned
+    assert!(config.pd_stack_top() % 16 == 0);
 
     // Bind the notification object
     let mut bind_ntfn_invocation = Invocation::new(
@@ -2979,19 +2983,19 @@ fn write_report<W: std::io::Write>(
     Ok(())
 }
 
-fn print_usage(available_boards: &[String]) {
-    println!("usage: microkit [-h] [-o OUTPUT] [-r REPORT] --board {{{}}} --config CONFIG [--search-path [SEARCH_PATH ...]] system", available_boards.join(","))
+fn print_usage() {
+    println!("usage: microkit [-h] [-o OUTPUT] [-r REPORT] --board BOARD --config CONFIG [--search-path [SEARCH_PATH ...]] system")
 }
 
 fn print_help(available_boards: &[String]) {
-    print_usage(available_boards);
+    print_usage();
     println!("\npositional arguments:");
     println!("  system");
     println!("\noptions:");
     println!("  -h, --help, show this help message and exit");
     println!("  -o, --output OUTPUT");
     println!("  -r, --report REPORT");
-    println!("  --board {{{}}}", available_boards.join(","));
+    println!("  --board {}", available_boards.join("\n          "));
     println!("  --config CONFIG");
     println!("  --search-path [SEARCH_PATH ...]");
 }
@@ -3017,7 +3021,7 @@ impl<'a> Args<'a> {
         let mut config = None;
 
         if args.len() <= 1 {
-            print_usage(available_boards);
+            print_usage();
             std::process::exit(1);
         }
 
@@ -3090,7 +3094,7 @@ impl<'a> Args<'a> {
         }
 
         if !unknown.is_empty() {
-            print_usage(available_boards);
+            print_usage();
             eprintln!(
                 "microkit: error: unrecognised arguments: {}",
                 unknown.join(" ")
@@ -3110,7 +3114,7 @@ impl<'a> Args<'a> {
         }
 
         if !missing_args.is_empty() {
-            print_usage(available_boards);
+            print_usage();
             eprintln!(
                 "microkit: error: the following arguments are required: {}",
                 missing_args.join(", ")
@@ -3171,6 +3175,7 @@ fn main() -> Result<(), String> {
             available_boards.push(path.file_name().unwrap().to_str().unwrap().to_string());
         }
     }
+    available_boards.sort();
 
     let env_args: Vec<_> = std::env::args().collect();
     let args = Args::parse(&env_args, &available_boards);
@@ -3592,6 +3597,7 @@ fn main() -> Result<(), String> {
     // Write out all the symbols for each PD
     pd_write_symbols(
         &system.protection_domains,
+        &system.channels,
         &mut pd_elf_files,
         &built_system.pd_setvar_values,
     )?;
