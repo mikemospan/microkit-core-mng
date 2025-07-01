@@ -57,7 +57,7 @@ void notified(microkit_channel ch) {
         break;
     case 'y':
         microkit_dbg_puts("[PD 1]: Turning on core #1\n");
-        core_on(1, 0x70000e5c);
+        core_on(1, 0x700022f0);
         break;
     case 'i':
         microkit_dbg_puts("[PD 1]: Viewing status of core #0\n");

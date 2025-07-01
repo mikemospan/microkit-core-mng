@@ -157,15 +157,15 @@ static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
 }
 
 static void core_migrate(int pd_id) {
-    int new_cpu = ++current_cpu % 4;
+    current_cpu = (current_cpu + 1) % 4;
     microkit_dbg_puts("Migrating PD");
     print_num(pd_id + 1);
     microkit_dbg_puts(" to CPU #");
-    print_num(new_cpu);
+    print_num(current_cpu);
     microkit_dbg_puts("\n");
 
     seL4_SchedControl_ConfigureFlags(
-        BASE_SCHED_CONTROL_CAP + new_cpu,
+        BASE_SCHED_CONTROL_CAP + current_cpu,
         BASE_SCHED_CONTEXT_CAP + pd_id,
         microkit_pd_period,
         microkit_pd_budget,

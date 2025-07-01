@@ -764,6 +764,10 @@ int psci_cpu_on(uint64_t cpu_id) {
     // asm volatile("dsb sy" ::: "memory");
     // asm volatile("isb" ::: "memory");
     // puts("\n");
+    puts("LDR|INFO: Starting secondary CPU with bootstrap function at ");
+    puthex64((uintptr_t)start_secondary_cpu);
+    puts("\n\n");
+
     return psci_func(PSCI_SM64_CPU_ON, curr_cpu_id, (unsigned long)&start_secondary_cpu, 0);
 }
 
