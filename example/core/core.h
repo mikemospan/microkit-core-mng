@@ -122,8 +122,8 @@ static void awaken_entry() {
     microkit_dbg_puts("A CPU core has re-awakened!\n");
 }
 
-static void core_on(uint8_t core) {
-    seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_ON, .x1 = core, .x2 = (seL4_Word) awaken_entry};
+static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
+    seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_ON, .x1 = core, .x2 = cpu_bootstrap + 0x2f0};
     seL4_ARM_SMCContext response = {0};
 
     microkit_arm_smc_call(&args, &response);

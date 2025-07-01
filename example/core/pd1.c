@@ -3,6 +3,7 @@
 #define PD2_CHANNEL 2
 
 uintptr_t buffer_vaddr;
+uintptr_t bootstrap_vaddr;
 
 void init(void) {
     microkit_dbg_puts("[PD 1]: Starting!\n");
@@ -31,7 +32,7 @@ void notified(microkit_channel ch) {
             "x: turn off pd2's core\n"
             "s: put pd2's core in standby\n"
             "y: turn on pd2's core\n"
-        );    
+        );
         break;
     case 'p':
         print_psci_version();
@@ -46,7 +47,7 @@ void notified(microkit_channel ch) {
         break;
     case 'm':
         core_migrate(0);
-        seL4_IRQHandler_SetCore(BASE_IRQ_CAP + UART_IRQ_CH, 1);
+        seL4_IRQHandler_SetCore(BASE_IRQ_CAP + UART_IRQ_CH, 2);
         break;
     case 'n':
         microkit_notify(PD2_CHANNEL);
@@ -55,8 +56,9 @@ void notified(microkit_channel ch) {
         microkit_notify(PD2_CHANNEL);
         break;
     case 'y':
-        microkit_dbg_puts("[PD 1]: Turning on core #0\n");
-        core_on(0);
+        microkit_dbg_puts("[PD 1]: Turning on core #1\n");
+        int (*cpu_bootstrap)(int) = (int(*)(int)) (0x70000e5c);
+        cpu_bootstrap(1);
         break;
     case 'i':
         microkit_dbg_puts("[PD 1]: Viewing status of core #0\n");

@@ -730,6 +730,7 @@ void disable_caches_el2(void);
 #define PSCI_SM64_CPU_ON 0xc4000003
 
 void start_secondary_cpu(void);
+int psci_cpu_on(uint64_t cpu_id);
 volatile uint64_t curr_cpu_id;
 volatile uintptr_t secondary_cpu_stack;
 static volatile int core_up[NUM_CPUS];
