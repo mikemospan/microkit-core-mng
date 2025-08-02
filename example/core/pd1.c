@@ -3,7 +3,6 @@
 #define PD2_CHANNEL 2
 
 uintptr_t buffer_vaddr;
-uintptr_t bootstrap_vaddr;
 
 void init(void) {
     microkit_dbg_puts("[PD 1]: Starting!\n");
@@ -56,12 +55,12 @@ void notified(microkit_channel ch) {
         microkit_notify(PD2_CHANNEL);
         break;
     case 'y':
-        microkit_dbg_puts("[PD 1]: Turning on core #1\n");
-        core_on(1, 0x700022f0);
+        microkit_dbg_puts("[PD 1]: Turning on core #3\n");
+        core_on(3, 0x700022f0);
         break;
     case 'i':
-        microkit_dbg_puts("[PD 1]: Viewing status of core #0\n");
-        core_status(0);
+        microkit_dbg_puts("[PD 1]: Viewing status of core #3\n");
+        core_status(3);
         break;
     }
 

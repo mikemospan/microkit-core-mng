@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <system>
     <memory_region name="uart" size="0x1_000" phys_addr="0x9_000_000"/>
-    <memory_region name="cpu_boot" size="0x1_000" phys_addr="0x70_000_000"/>
     <memory_region name="buffer" size="0x1_000"/>
 
     <protection_domain name="pd1" priority="254" smc="true">
         <program_image path="pd1.elf"/>
         <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
-        <map mr="cpu_boot" vaddr="0x70_000_000" perms="rw" cached="false" setvar_vaddr="bootstrap_vaddr"/>
         <map mr="buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="buffer_vaddr"/>
         <irq irq="33" id="1"/>
     </protection_domain>
