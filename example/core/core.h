@@ -35,9 +35,9 @@ static void print_psci_version() {
     microkit_arm_smc_call(&args, &resp);
 
     microkit_dbg_puts("PSCI version: ");
-    print_num(((uint32_t) resp.x0 >> 16) & 0xFFFF);
+    uart_print_num(((uint32_t) resp.x0 >> 16) & 0xFFFF);
     microkit_dbg_puts(".");
-    print_num((uint32_t) resp.x0 & 0xFFFF);
+    uart_print_num((uint32_t) resp.x0 & 0xFFFF);
     microkit_dbg_puts("\n");
 }
 
@@ -159,9 +159,9 @@ static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
 static void core_migrate(int pd_id) {
     current_cpu = (current_cpu + 1) % 4;
     microkit_dbg_puts("Migrating PD");
-    print_num(pd_id + 1);
+    uart_print_num(pd_id + 1);
     microkit_dbg_puts(" to CPU #");
-    print_num(current_cpu);
+    uart_print_num(current_cpu);
     microkit_dbg_puts("\n");
 
     seL4_SchedControl_ConfigureFlags(

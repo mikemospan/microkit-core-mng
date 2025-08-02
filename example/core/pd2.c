@@ -24,7 +24,7 @@ void notified(microkit_channel ch) {
         break;
     case 'x':
         microkit_dbg_puts("[PD 2]: Turning off core #");
-        print_num(current_cpu);
+        uart_print_num(current_cpu);
         microkit_dbg_puts("\n");
         
         core_off();

@@ -1,12 +1,21 @@
 #include "core.h"
-
 #define PD2_CHANNEL 2
 
 uintptr_t buffer_vaddr;
+uintptr_t cpu_bootstrap_phys_start = 0x80000000;
+
+extern void assembly_print_start(void);
 
 void init(void) {
     microkit_dbg_puts("[PD 1]: Starting!\n");
     uart_init();
+    
+    /* Print bootstrap info for debugging */
+    microkit_dbg_puts("[PD 1]: Bootstrap code available at physical address: ");
+    uart_print_hex(cpu_bootstrap_phys_start);
+    microkit_dbg_puts("\n");
+
+    assembly_print_start();
 }
 
 void notified(microkit_channel ch) {
@@ -14,10 +23,8 @@ void notified(microkit_channel ch) {
         microkit_dbg_puts("Received unexpected notification\n");
         return;
     }
-
     ((char *) buffer_vaddr)[0] = uart_get_char();
     uart_handle_irq();
-
     switch (((char *) buffer_vaddr)[0]) {
     case 'h':
         microkit_dbg_puts(
@@ -55,8 +62,10 @@ void notified(microkit_channel ch) {
         microkit_notify(PD2_CHANNEL);
         break;
     case 'y':
-        microkit_dbg_puts("[PD 1]: Turning on core #3\n");
-        core_on(3, 0x700022f0);
+        microkit_dbg_puts("[PD 1]: Turning on core #3");
+        
+        /* Use the actual bootstrap physical address */
+        core_on(3, (uintptr_t)cpu_bootstrap_phys_start);
         break;
     case 'i':
         microkit_dbg_puts("[PD 1]: Viewing status of core #3\n");

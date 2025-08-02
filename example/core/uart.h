@@ -56,14 +56,31 @@ static void uart_put_str(char *str) {
     }
 }
 
-static void print_num(uint64_t num) {
+static void uart_print_num(uint64_t num) {
     if (num == 0) {
         uart_put_char('0');
         return;
     }
 
     if (num > 9) {
-        print_num(num / 10);
+        uart_print_num(num / 10);
     }
     uart_put_char('0' + (num % 10));
+}
+
+static void uart_print_hex(uint64_t num) {
+    uart_put_str("0x");
+
+    int started = 0;
+    for (int i = 15; i >= 0; i--) {
+        uint8_t nibble = (num >> (i * 4)) & 0xF;
+        if (nibble || started || i == 0) {
+            started = 1;
+            if (nibble < 10) {
+                uart_put_char('0' + nibble);
+            } else {
+                uart_put_char('a' + (nibble - 10));
+            }
+        }
+    }
 }

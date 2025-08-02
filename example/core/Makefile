@@ -41,15 +41,26 @@ endif
 
 all: $(IMAGE_FILE)
 
+# Regular C file compilation
 $(BUILD_DIR)/%.o: %.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
-$(BUILD_DIR)/pd1.elf: $(addprefix $(BUILD_DIR)/, $(PD1_OBJS))
+# Assembly file compilation
+$(BUILD_DIR)/%.o: %.S Makefile
+	$(CC) -c $(CFLAGS) $< -o $@
+
+# Bootstrap assembly compilation and linking
+$(BUILD_DIR)/bootstrap.elf: $(BUILD_DIR)/bootstrap.o ./aarch64.lds
+	$(LD) -T ./aarch64.lds $(BUILD_DIR)/bootstrap.o -o $@
+
+# PD1 needs bootstrap symbols, so include bootstrap.o
+$(BUILD_DIR)/pd1.elf: $(addprefix $(BUILD_DIR)/, $(PD1_OBJS)) $(BUILD_DIR)/bootstrap.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 $(BUILD_DIR)/pd2.elf: $(addprefix $(BUILD_DIR)/, $(PD2_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
+# System image generation
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) core.system
 	$(MICROKIT_TOOL) core.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
 
@@ -66,4 +77,4 @@ qemu: $(IMAGE_FILE)
 		-m size=2G \
 		-nographic \
 		-d in_asm,guest_errors \
-  		-D qemu_debug.log
+		-D qemu_debug.log
