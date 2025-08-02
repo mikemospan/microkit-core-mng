@@ -130,7 +130,6 @@ static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
 
     switch (response.x0) {
     case PSCI_SUCCESS:
-        microkit_dbg_puts("Successfully turned on the CPU core.\n");
         break;
     case PSCI_E_INVALID_PARAMETERS:
         microkit_dbg_puts("Your request to turn on the cpu core had invalid parameters.\n");

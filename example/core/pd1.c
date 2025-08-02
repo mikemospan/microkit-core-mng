@@ -1,21 +1,23 @@
 #include "core.h"
+
 #define PD2_CHANNEL 2
 
 uintptr_t buffer_vaddr;
-uintptr_t cpu_bootstrap_phys_start = 0x80000000;
+uintptr_t bootstrap_vaddr;
+extern char bootstrap_start[];
+extern char bootstrap_end[];
 
-extern void assembly_print_start(void);
+static void *memcpy(void *dst, const void *src, uint64_t sz);
 
 void init(void) {
     microkit_dbg_puts("[PD 1]: Starting!\n");
-    uart_init();
-    
-    /* Print bootstrap info for debugging */
-    microkit_dbg_puts("[PD 1]: Bootstrap code available at physical address: ");
-    uart_print_hex(cpu_bootstrap_phys_start);
-    microkit_dbg_puts("\n");
 
-    assembly_print_start();
+    uart_init();
+
+    // Copy to the mapped bootstrap region and flush the cache
+    uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
+    memcpy((void*)bootstrap_vaddr, bootstrap_start, bootstrap_size);
+    asm volatile("dsb sy" ::: "memory");
 }
 
 void notified(microkit_channel ch) {
@@ -23,8 +25,10 @@ void notified(microkit_channel ch) {
         microkit_dbg_puts("Received unexpected notification\n");
         return;
     }
+
     ((char *) buffer_vaddr)[0] = uart_get_char();
     uart_handle_irq();
+
     switch (((char *) buffer_vaddr)[0]) {
     case 'h':
         microkit_dbg_puts(
@@ -62,10 +66,8 @@ void notified(microkit_channel ch) {
         microkit_notify(PD2_CHANNEL);
         break;
     case 'y':
-        microkit_dbg_puts("[PD 1]: Turning on core #3");
-        
-        /* Use the actual bootstrap physical address */
-        core_on(3, (uintptr_t)cpu_bootstrap_phys_start);
+        microkit_dbg_puts("[PD 1]: Turning on core #3\n");
+        core_on(3, 0x80000000);
         break;
     case 'i':
         microkit_dbg_puts("[PD 1]: Viewing status of core #3\n");
@@ -74,4 +76,15 @@ void notified(microkit_channel ch) {
     }
 
     microkit_irq_ack(ch);
+}
+
+static void *memcpy(void *dst, const void *src, uint64_t sz)
+{
+    char *dst_ = dst;
+    const char *src_ = src;
+    while (sz-- > 0) {
+        *dst_++ = *src_++;
+    }
+
+    return dst;
 }

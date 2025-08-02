@@ -50,8 +50,8 @@ $(BUILD_DIR)/%.o: %.S Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
 # Bootstrap assembly compilation and linking
-$(BUILD_DIR)/bootstrap.elf: $(BUILD_DIR)/bootstrap.o ./aarch64.lds
-	$(LD) -T ./aarch64.lds $(BUILD_DIR)/bootstrap.o -o $@
+$(BUILD_DIR)/bootstrap.elf: $(BUILD_DIR)/bootstrap.o
+	$(LD) $(BUILD_DIR)/bootstrap.o -o $@
 
 # PD1 needs bootstrap symbols, so include bootstrap.o
 $(BUILD_DIR)/pd1.elf: $(addprefix $(BUILD_DIR)/, $(PD1_OBJS)) $(BUILD_DIR)/bootstrap.o
