@@ -88,3 +88,19 @@ static void *memcpy(void *dst, const void *src, uint64_t sz)
 
     return dst;
 }
+
+__attribute__((section(".text.bootstrap_c")))
+void secondary_cpu_entry(void) {
+    // Direct UART output (no function calls that might crash)
+    volatile uint32_t *uart = (volatile uint32_t *)0x09000000;
+    
+    // Print "W" directly to UART
+    uart[0] = 'W';  // PL011_UARTDR offset 0
+    uart[0] = 'O';
+    uart[0] = 'A';
+    uart[0] = 'H';
+    uart[0] = '\n';
+    
+    // Then try the microkit function
+    microkit_dbg_puts("WOAH microkit\n");
+}

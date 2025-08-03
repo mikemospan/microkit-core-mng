@@ -14,7 +14,7 @@ PD2_OBJS := pd2.o
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
 IMAGES := pd1.elf pd2.elf
 CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include
-LDFLAGS := -L$(BOARD_DIR)/lib
+LDFLAGS := -L$(BOARD_DIR)/lib -T aarch64.ld
 LIBS := -lmicrokit -Tmicrokit.ld
 
 IMAGE_FILE = $(BUILD_DIR)/loader.img
