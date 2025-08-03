@@ -1,6 +1,6 @@
 /* bootstrap.S - Simplified Bootstrap code for CPU core startup */
 
-.section ".text.bootstrap_asm"
+.section ".text.bootstrap"
 
 .global bootstrap_start
 .global bootstrap_end
