@@ -1,12 +1,13 @@
-/* bootstrap.ld - Simple linker script to group bootstrap code */
-
+/* aarch64.ld - Correct linker script to place bootstrap after text */
 SECTIONS
 {
+    /* Place bootstrap section immediately after the text section ends */
     .text.bootstrap : {
         bootstrap_start = .;
-        *bootstrap.o(.text.bootstrap)     /* Assembly file first */
-        *(.text.bootstrap)                /* Then everything else */
+        *bootstrap_s.o(.text.bootstrap)     /* Assembly file first */  
+        *bootstrap_c.o(.text.bootstrap)     /* C file second */
         bootstrap_end = .;
     }
 }
+/* This inserts the section definition into the default linker script AFTER .text */
 INSERT AFTER .text;

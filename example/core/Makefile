@@ -21,6 +21,10 @@ IMAGE_FILE = $(BUILD_DIR)/loader.img
 REPORT_FILE = $(BUILD_DIR)/report.txt
 QEMU := qemu-system-aarch64
 
+BOOTSTRAP_OBJS := bootstrap_c.o bootstrap_s.o
+
+.PHONY: all clean qemu
+
 # Ensure necessary environment variables are set
 ifeq ($(strip $(BUILD_DIR)),)
 $(error BUILD_DIR must be specified)
@@ -38,29 +42,28 @@ ifeq ($(strip $(MICROKIT_CONFIG)),)
 $(error MICROKIT_CONFIG must be specified)
 endif
 
-
 all: $(IMAGE_FILE)
 
-# Regular C file compilation
+# Compile C source files
 $(BUILD_DIR)/%.o: %.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
-# Assembly file compilation
-$(BUILD_DIR)/%.o: %.S Makefile
+# Compile bootstrap components
+$(BUILD_DIR)/bootstrap_c.o: bootstrap.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
-# Bootstrap assembly compilation and linking
-$(BUILD_DIR)/bootstrap.elf: $(BUILD_DIR)/bootstrap.o
-	$(LD) $(BUILD_DIR)/bootstrap.o -o $@
+$(BUILD_DIR)/bootstrap_s.o: bootstrap.S Makefile
+	$(CC) -c $(CFLAGS) $< -o $@
 
-# PD1 needs bootstrap symbols, so include bootstrap.o
-$(BUILD_DIR)/pd1.elf: $(addprefix $(BUILD_DIR)/, $(PD1_OBJS)) $(BUILD_DIR)/bootstrap.o
+# Link pd1.elf including bootstrap object files
+$(BUILD_DIR)/pd1.elf: $(addprefix $(BUILD_DIR)/, $(PD1_OBJS) $(BOOTSTRAP_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
+# Link pd2.elf
 $(BUILD_DIR)/pd2.elf: $(addprefix $(BUILD_DIR)/, $(PD2_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
-# System image generation
+# Generate image and report
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) core.system
 	$(MICROKIT_TOOL) core.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
 
