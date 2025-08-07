@@ -26,7 +26,6 @@
     __str_ptr; \
 })
 
-void switch_to_el1(void);
 void el2_mmu_enable(void);
 
 /* Paging structures for kernel mapping */
@@ -38,31 +37,17 @@ uint64_t boot_lvl2_upper[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl0_lower[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_lower[1 << 9] ALIGN(1 << 12);
 
-static void uart_put_char_phys(int ch) {
+static void putc(int ch) {
     volatile uint32_t *uart_phys = (volatile uint32_t *)0x09000000;
     uart_phys[UARTDR/4] = ch;
 }
 
-static void uart_put_str_phys(const char *str) {
-    while (*str) {
-        uart_put_char_phys(*str);
-        str++;
-    }
-}
-
-static void uart_put_hex_phys(uint64_t value) {
-    uart_put_str_phys("0x");
-    
-    // Print 16 hex digits (64 bits)
-    for (int i = 15; i >= 0; i--) {
-        uint8_t nibble = (value >> (i * 4)) & 0xF;
-        if (nibble < 10) {
-            uart_put_char_phys('0' + nibble);
-        } else {
-            uart_put_char_phys('A' + nibble - 10);
-        }
-    }
-}
+#define puts(literal) do {                          \
+    const char *boot_str = BOOTSTRAP_STR(literal);  \
+    while (*boot_str) {                             \
+        putc(*boot_str++);                          \
+    }                                               \
+} while (0)
 
 static int current_el(void) {
     /* See: C5.2.1 CurrentEL */
@@ -75,21 +60,21 @@ static int current_el(void) {
 void secondary_cpu_entry(uint64_t cpu_id) {
     asm volatile("dsb sy" ::: "memory");
     
-    uart_put_str_phys(BOOTSTRAP_STR("[Core Manager]: Booting CPU #"));
-    uart_put_char_phys(cpu_id + '0');
-    uart_put_char_phys('\n');
+    puts("[Core Manager]: Booting CPU #");
+    putc(cpu_id + '0');
+    putc('\n');
 
     int el = current_el();
-    uart_put_str_phys(BOOTSTRAP_STR("CurrentEL = EL"));
-    uart_put_char_phys(el + '0');
-    uart_put_char_phys('\n');
+    puts("CurrentEL = EL");
+    putc(el + '0');
+    putc('\n');
 
     if (el == 2) {
         /* seL4 relies on the timer to be set to a useful value */
-        uart_put_str_phys(BOOTSTRAP_STR("Resetting CNTVOFF\n"));
+        puts("Resetting CNTVOFF\n");
         asm volatile("msr cntvoff_el2, xzr");
     } else {
-        uart_put_str_phys(BOOTSTRAP_STR("We're not in EL2!!\n"));
+        puts("We're not in EL2!!\n");
         goto fail;
     }
 
@@ -97,7 +82,7 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     /* Whether or not seL4 is booting in EL2 does not matter, as it always looks at tpidr_el1 */
     asm volatile("msr tpidr_el1" ",%0" :: "r" (cpu_id));
 
-    uart_put_str_phys(BOOTSTRAP_STR("Enabling the MMU\n"));
+    puts("Enabling the MMU\n");
     el2_mmu_enable();
 
 fail:

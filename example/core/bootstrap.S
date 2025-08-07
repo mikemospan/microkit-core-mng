@@ -197,57 +197,6 @@ BEGIN_FUNC(bootstrap_start)
    
 END_FUNC(bootstrap_start)
 
-/*
- * Switch from to running in EL1 (assumes correctly running in EL2).
- */
-BEGIN_FUNC(switch_to_el1)
-    /* push frame pointer and link register to the stack */
-    stp     x29, x30, [sp, #-16]!
-    mov     x29, sp
-
-    bl      flush_dcache
-
-    /* Disable EL2 MMU (stage1) */
-    disable_mmu sctlr_el2, x9
-
-    bl      invalidate_icache
-
-    /* Set execution state for EL1 to AArch64 -- disable virtualization */
-    mov     x9, #(1 << 31)
-    msr     hcr_el2, x9
-
-    /* Disable traps to EL2 */
-    /* FIXME: This enables the 'TZ' bit, which seems to be against the design */
-    mov     x9, #0x33ff
-    msr     cptr_el2, x9
-    msr     hstr_el2, xzr
-
-    /* Since stage 2 addressing is disable, clear the base register */
-    msr     vttbr_el2, xzr
-
-    /* Disable EL1 MMU (stage1) */
-    disable_mmu sctlr_el1 , x9
-
-    /* Set SPSR for EL2
-     *   I => interrupts are masked
-     *   F => fast interrupts are masked
-     *   A => SError interrupts are masked
-     *   D => debug exceptions are masked
-     *   MODE_EL1h => return to EL1 on eret (using SP_EL1, not SP_EL0)
-     */
-    mov     x9, #(PSR_F_BIT | PSR_I_BIT | PSR_A_BIT | PSR_D_BIT | PSR_MODE_EL1h)
-    msr     spsr_el2, x9
-
-    /* The same stack is reused */
-    ldp     x29, x30, [sp], #16
-    mov     x10, sp
-    msr     sp_el1, x10
-
-    /* set ELR so that it's possible to perform ERET */
-    msr     elr_el2, x30
-    eret
-END_FUNC(switch_to_el1)
-
 /* Invalidate the I-cache */
 BEGIN_FUNC(invalidate_icache)
     ic      iallu
