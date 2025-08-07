@@ -1,7 +1,6 @@
 #include <stdint.h>
 
 #define ALIGN(n)  __attribute__((__aligned__(n)))
-#define SECTION(n)  __attribute__((section(n)))
 
 #define UARTDR                 0x000
 
@@ -39,13 +38,11 @@ uint64_t boot_lvl2_upper[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl0_lower[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_lower[1 << 9] ALIGN(1 << 12);
 
-SECTION(".text.bootstrap")
 static void uart_put_char_phys(int ch) {
     volatile uint32_t *uart_phys = (volatile uint32_t *)0x09000000;
     uart_phys[UARTDR/4] = ch;
 }
 
-SECTION(".text.bootstrap")
 static void uart_put_str_phys(const char *str) {
     while (*str) {
         uart_put_char_phys(*str);
@@ -53,7 +50,6 @@ static void uart_put_str_phys(const char *str) {
     }
 }
 
-SECTION(".text.bootstrap")
 static void uart_put_hex_phys(uint64_t value) {
     uart_put_str_phys("0x");
     
@@ -68,7 +64,6 @@ static void uart_put_hex_phys(uint64_t value) {
     }
 }
 
-SECTION(".text.bootstrap")
 static int current_el(void) {
     /* See: C5.2.1 CurrentEL */
     uint32_t val;
@@ -77,7 +72,6 @@ static int current_el(void) {
     return val >> 2;
 }
 
-SECTION(".text.bootstrap")
 void secondary_cpu_entry(uint64_t cpu_id) {
     asm volatile("dsb sy" ::: "memory");
     

@@ -1,7 +1,5 @@
 /* bootstrap.S - Simplified Bootstrap code for CPU core startup */
 
-.section ".text.bootstrap"
-
 #define PSR_F_BIT         0x00000040
 #define PSR_I_BIT         0x00000080
 #define PSR_A_BIT         0x00000100

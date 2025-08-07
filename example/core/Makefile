@@ -50,7 +50,7 @@ $(BUILD_DIR)/%.o: %.c Makefile
 
 # Compile bootstrap components
 $(BUILD_DIR)/bootstrap_c.o: bootstrap.c Makefile
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) -ffunction-sections -fdata-sections $< -o $@
 
 $(BUILD_DIR)/bootstrap_s.o: bootstrap.S Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
