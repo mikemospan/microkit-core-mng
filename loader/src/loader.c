@@ -747,12 +747,10 @@ static inline void dsb(void)
 int psci_func(unsigned long smc_function_id, unsigned long param1, unsigned long param2, unsigned long param3);
 
 int psci_cpu_on(uint64_t cpu_id) {
-    puts("IN psci_cpu_on\n");
     // __atomic_store_n(&curr_cpu_id, cpu_id, __ATOMIC_SEQ_CST);
     asm volatile("dsb sy" ::: "memory");
     curr_cpu_id = cpu_id;
     asm volatile("dsb sy" ::: "memory");
-    puts("stored curr cpu id\n");
     uintptr_t cpu_stack = (uintptr_t)(&_stack[curr_cpu_id][0xff0]);
     // puthex64(cpu_stack);
     // puts("\n");
@@ -764,9 +762,6 @@ int psci_cpu_on(uint64_t cpu_id) {
     // asm volatile("dsb sy" ::: "memory");
     // asm volatile("isb" ::: "memory");
     // puts("\n");
-    puts("LDR|INFO: Starting secondary CPU with bootstrap function at ");
-    puthex64((uintptr_t)start_secondary_cpu);
-    puts("\n\n");
 
     return psci_func(PSCI_SM64_CPU_ON, curr_cpu_id, (unsigned long)&start_secondary_cpu, 0);
 }
