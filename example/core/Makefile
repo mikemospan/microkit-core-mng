@@ -9,10 +9,10 @@ LD := $(TOOLCHAIN)-ld
 AS := $(TOOLCHAIN)-as
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-PD1_OBJS := pd1.o
+CORE_MANAGER_OBJS := core_manager.o
 PD2_OBJS := pd2.o
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
-IMAGES := pd1.elf pd2.elf
+IMAGES := core_manager.elf pd2.elf
 CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include
 LDFLAGS := -L$(BOARD_DIR)/lib -T bootstrap.ld
 LIBS := -lmicrokit -Tmicrokit.ld
@@ -55,8 +55,8 @@ $(BUILD_DIR)/bootstrap_c.o: bootstrap.c Makefile
 $(BUILD_DIR)/bootstrap_s.o: bootstrap.S Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
-# Link pd1.elf including bootstrap object files
-$(BUILD_DIR)/pd1.elf: $(addprefix $(BUILD_DIR)/, $(PD1_OBJS) $(BOOTSTRAP_OBJS))
+# Link core_manager.elf including bootstrap object files
+$(BUILD_DIR)/core_manager.elf: $(addprefix $(BUILD_DIR)/, $(CORE_MANAGER_OBJS) $(BOOTSTRAP_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 # Link pd2.elf

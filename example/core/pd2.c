@@ -1,6 +1,6 @@
 #include "core.h"
 
-#define PD1_CHANNEL 1
+#define CORE_MANAGER_CHANNEL 1
 
 uintptr_t buffer_vaddr;
 
@@ -9,7 +9,7 @@ void init(void) {
 }
 
 void notified(microkit_channel ch) {
-    if (ch != PD1_CHANNEL) {
+    if (ch != CORE_MANAGER_CHANNEL) {
         microkit_dbg_puts("Received unexpected notification\n");
         return;
     }

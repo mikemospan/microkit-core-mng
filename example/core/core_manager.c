@@ -38,7 +38,7 @@ void notified(microkit_channel ch) {
             "p: print psci version\n"
             "i: view the status of core #0\n"
             "d: core dump\n"
-            "m: migrate pd1\n"
+            "m: migrate core_manager\n"
             "n: migrate pd2\n"
             "x: turn off pd2's core\n"
             "s: put pd2's core in standby\n"
@@ -49,7 +49,7 @@ void notified(microkit_channel ch) {
         print_psci_version();
         break;
     case 'd':
-        microkit_dbg_puts("=== THE FOLLOWING DUMP IS FOR PROTECTION DOMAINS RUNNING ON PD1's CORE ===\n");
+        microkit_dbg_puts("=== THE FOLLOWING DUMP IS FOR PROTECTION DOMAINS RUNNING ON THE CORE MANAGER's CORE ===\n");
         seL4_DebugDumpScheduler();
         microkit_notify(PD2_CHANNEL);
         break;
@@ -70,7 +70,7 @@ void notified(microkit_channel ch) {
         core_on(3, 0x80000000);
         break;
     case 'i':
-        microkit_dbg_puts("[PD 1]: Viewing status of core #3\n");
+        microkit_dbg_puts("[Core Manager]: Viewing status of core #3\n");
         core_status(3);
         break;
     }
