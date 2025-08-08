@@ -14,7 +14,7 @@ PD2_OBJS := pd2.o
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
 IMAGES := pd1.elf pd2.elf
 CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include
-LDFLAGS := -L$(BOARD_DIR)/lib -T aarch64.ld
+LDFLAGS := -L$(BOARD_DIR)/lib -T bootstrap.ld
 LIBS := -lmicrokit -Tmicrokit.ld
 
 IMAGE_FILE = $(BUILD_DIR)/loader.img
@@ -50,7 +50,7 @@ $(BUILD_DIR)/%.o: %.c Makefile
 
 # Compile bootstrap components
 $(BUILD_DIR)/bootstrap_c.o: bootstrap.c Makefile
-	$(CC) -c $(CFLAGS) -ffunction-sections -fdata-sections -fPIC $< -o $@
+	$(CC) -c $(CFLAGS) -ffunction-sections -fdata-sections $< -o $@
 
 $(BUILD_DIR)/bootstrap_s.o: bootstrap.S Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
