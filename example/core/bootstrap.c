@@ -4,28 +4,6 @@
 
 #define UARTDR                 0x000
 
-/* This macro embeds a string literal directly into the bootstrap code section and 
-* returns a position-independent pointer to it. This is needed because normal strings 
-* can get placed at virtual addresses that are inaccessible when bootstrap code 
-* runs from copied physical memory at 0x80000000. Uses ADR instruction to calculate 
-* the string address relative to the current program counter, bypassing linker 
-* virtual addressing and compiler optimisations.
-*/
-#define BOOTSTRAP_STR(string_literal) ({ \
-    const char *__str_ptr; \
-    asm volatile( \
-        "adr %0, 1f\n\t" \
-        "b 2f\n" \
-        "1: .asciz " #string_literal "\n\t" \
-        ".balign 4\n" \
-        "2:" \
-        : "=r" (__str_ptr) \
-        : \
-        : "memory" \
-    ); \
-    __str_ptr; \
-})
-
 void el2_mmu_enable(void);
 
 /* Paging structures for kernel mapping */
@@ -42,12 +20,11 @@ static void putc(int ch) {
     uart_phys[UARTDR/4] = ch;
 }
 
-#define puts(literal) do {                          \
-    const char *boot_str = BOOTSTRAP_STR(literal);  \
-    while (*boot_str) {                             \
-        putc(*boot_str++);                          \
-    }                                               \
-} while (0)
+static void puts(const char *str) {
+    while (*str) {
+        putc(*str++);
+    }
+}
 
 static int current_el(void) {
     /* See: C5.2.1 CurrentEL */
@@ -87,9 +64,8 @@ void secondary_cpu_entry(uint64_t cpu_id) {
 
 fail:
     /* Note: can't usefully return to U-Boot once we are here. */
-    /* IMPROVEMENT: use SMC SVC call to try and power-off / reboot system.
-     * or at least go to a WFI loop
-     */
+    /* Put the CPU into a low-power wait loop */
     for (;;) {
+        asm volatile("wfi");
     }
 }

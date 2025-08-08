@@ -3,10 +3,16 @@
 SECTIONS
 {
     .text.bootstrap : {
-        bootstrap_start = .;
+        bootstrap_text_start = .;
         *bootstrap_s.o(.text*)  /* Assembly file first */  
         *bootstrap_c.o(.text*)  /* C file second */
-        bootstrap_end = .;
+        bootstrap_text_end = .;
+    }
+
+    .rodata.bootstrap : {
+        bootstrap_rodata_start = .;
+        *bootstrap_c.o(.rodata*)
+        bootstrap_rodata_end = .;
     }
 }
 

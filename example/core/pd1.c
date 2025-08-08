@@ -4,19 +4,25 @@
 
 uintptr_t buffer_vaddr;
 uintptr_t bootstrap_vaddr;
-extern char bootstrap_start[];
-extern char bootstrap_end[];
+extern char bootstrap_text_start[];
+extern char bootstrap_text_end[];
+extern char bootstrap_rodata_start[];
+extern char bootstrap_rodata_end[];
 
 static void *memcpy(void *dst, const void *src, uint64_t sz);
 
 void init(void) {
     microkit_dbg_puts("[PD 1]: Starting!\n");
-
     uart_init();
-
-    // Copy to the mapped bootstrap region and flush the cache
-    uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
-    memcpy((void*)bootstrap_vaddr, bootstrap_start, bootstrap_size);
+    
+    // Copy text section
+    uint64_t text_size = (uintptr_t)bootstrap_text_end - (uintptr_t)bootstrap_text_start;
+    memcpy((void*)bootstrap_vaddr, bootstrap_text_start, text_size);
+    
+    // Copy rodata section right after text
+    uint64_t rodata_size = (uintptr_t)bootstrap_rodata_end - (uintptr_t)bootstrap_rodata_start;
+    memcpy((void*)(bootstrap_vaddr + text_size), bootstrap_rodata_start, rodata_size);
+    
     asm volatile("dsb sy" ::: "memory");
 }
 
