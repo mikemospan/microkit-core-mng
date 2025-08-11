@@ -7,10 +7,31 @@
 #define AARCH64_1GB_BLOCK_BITS 30
 #define AARCH64_2MB_BLOCK_BITS 21
 
+typedef void (*sel4_entry)(
+    uintptr_t ui_p_reg_start,
+    uintptr_t ui_p_reg_end,
+    intptr_t pv_offset,
+    uintptr_t v_entry,
+    uintptr_t dtb_addr_p,
+    uintptr_t dtb_size,
+    uintptr_t extra_device_addr_p,
+    uintptr_t extra_device_size
+);
+
 void el2_mmu_enable(void);
 
-/* Paging structures for identity mapping */
-uint64_t boot_lvl0_lower[1 << 9] ALIGN(1 << 12);
+/* Physical address to the underlying hardware page table */
+uintptr_t boot_lvl0_lower[1 << 9] ALIGN(1 << 12);
+/* Bootstrap data needed to later start the kernel */
+uintptr_t kernel_entry;
+uintptr_t ui_p_reg_start;
+uintptr_t ui_p_reg_end;
+intptr_t pv_offset;
+uintptr_t v_entry;
+uintptr_t dtb_addr_p;
+uintptr_t dtb_size;
+uintptr_t extra_device_addr_p;
+uintptr_t extra_device_size;
 
 static void putc(int ch) {
     volatile uint32_t *uart_phys = (volatile uint32_t *)0x09000000;
@@ -23,13 +44,35 @@ static void puts(const char *str) {
     }
 }
 
-static void *memset(void *dst, uint64_t val, uint64_t sz) {
-    char *dst_ = dst;
-    while (sz-- > 0) {
-        *dst_++ = val;
-    }
+static void put_hex64(uint64_t num) {
+    puts("0x");
 
-    return dst;
+    int started = 0;
+    for (int i = 15; i >= 0; i--) {
+        uint8_t nibble = (num >> (i * 4)) & 0xF;
+        if (nibble || started || i == 0) {
+            started = 1;
+            if (nibble < 10) {
+                putc('0' + nibble);
+            } else {
+                putc('a' + (nibble - 10));
+            }
+        }
+    }
+}
+
+static void start_kernel(void)
+{
+    ((sel4_entry)(kernel_entry))(
+        ui_p_reg_start,
+        ui_p_reg_end,
+        pv_offset,
+        v_entry,
+        0,
+        0,
+        extra_device_addr_p,
+        extra_device_size
+    );
 }
 
 static int current_el(void) {
@@ -67,6 +110,12 @@ void secondary_cpu_entry(uint64_t cpu_id) {
 
     puts("Enabling the MMU\n");
     el2_mmu_enable();
+
+    start_kernel();
+
+    puts("seL4 Loader: Error - KERNEL RETURNED (CPU ");
+    putc(cpu_id + '0');
+    puts(")\n");
 
 fail:
     /* Note: can't usefully return to U-Boot once we are here. */
