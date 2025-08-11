@@ -96,6 +96,7 @@ struct ElfHeader64 {
 
 const ELF_MAGIC: &[u8; 4] = b"\x7FELF";
 
+#[derive(Clone)]
 pub struct ElfSegment {
     pub data: Vec<u8>,
     pub phys_addr: u64,
@@ -131,6 +132,7 @@ enum ElfSegmentAttributes {
     Read = 0x4,
 }
 
+#[derive(Clone)]
 pub struct ElfFile {
     pub word_size: usize,
     pub entry: u64,

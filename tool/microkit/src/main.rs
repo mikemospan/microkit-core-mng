@@ -386,6 +386,7 @@ pub fn pd_write_symbols(
 ) -> Result<(), String> {
     for (i, pd) in pds.iter().enumerate() {
         let elf = &mut pd_elf_files[i];
+
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf.write_symbol("microkit_name", &name[..name_length])?;
@@ -3629,6 +3630,22 @@ fn main() -> Result<(), String> {
         }
     }
     report_buf.flush().unwrap();
+
+    let core_manager_elf = &mut pd_elf_files[0];
+    let boot_info = Loader::calculate_boot_info(
+        &kernel_elf,
+        &monitor_elf,
+        Some(built_system.initial_task_phys_region.base),
+        built_system.reserved_region
+    );
+
+    core_manager_elf.write_symbol("kernel_entry", &boot_info.kernel_entry.to_le_bytes())?;
+    core_manager_elf.write_symbol("ui_p_reg_start", &boot_info.ui_p_reg_start.to_le_bytes())?;
+    core_manager_elf.write_symbol("ui_p_reg_end", &boot_info.ui_p_reg_end.to_le_bytes())?;
+    core_manager_elf.write_symbol("pv_offset", &boot_info.pv_offset.to_le_bytes())?;
+    core_manager_elf.write_symbol("v_entry", &boot_info.v_entry.to_le_bytes())?;
+    core_manager_elf.write_symbol("extra_device_addr_p", &boot_info.extra_device_addr_p.to_le_bytes())?;
+    core_manager_elf.write_symbol("extra_device_size", &boot_info.extra_device_size.to_le_bytes())?;
 
     let mut loader_regions: Vec<(u64, &[u8])> = vec![(
         built_system.reserved_region.base,

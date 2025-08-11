@@ -128,6 +128,60 @@ pub struct Loader<'a> {
     regions: Vec<(u64, &'a [u8])>,
 }
 
+pub struct BootInfo {
+    pub kernel_entry: u64,
+    pub ui_p_reg_start: u64,
+    pub ui_p_reg_end: u64,
+    pub pv_offset: u64,
+    pub v_entry: u64,
+    pub extra_device_addr_p: u64,
+    pub extra_device_size: u64,
+}
+
+impl<'a> Loader<'a> {
+    pub fn calculate_boot_info(
+        kernel_elf: &ElfFile,
+        initial_task_elf: &ElfFile,
+        initial_task_phys_base: Option<u64>,
+        reserved_region: MemoryRegion
+    ) -> BootInfo {
+        let initial_task_segments: Vec<_> = initial_task_elf
+            .segments
+            .iter()
+            .filter(|s| s.loadable)
+            .collect();
+        assert!(initial_task_segments.len() == 1);
+        let segment = &initial_task_segments[0];
+
+        let inittask_first_vaddr = segment.virt_addr;
+        let inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size(), kb(4));
+
+        let inittask_first_paddr = match initial_task_phys_base {
+            Some(paddr) => paddr,
+            None => segment.phys_addr,
+        };
+        let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
+
+        let kernel_entry = kernel_elf.entry;
+        let ui_p_reg_start = inittask_first_paddr;
+        let ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset;
+        let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
+        let v_entry = initial_task_elf.entry;
+        let extra_device_addr_p = reserved_region.base;
+        let extra_device_size = reserved_region.size();
+
+        BootInfo {
+            kernel_entry,
+            ui_p_reg_start,
+            ui_p_reg_end,
+            pv_offset,
+            v_entry,
+            extra_device_addr_p,
+            extra_device_size
+        }
+    }
+}
+
 impl<'a> Loader<'a> {
     pub fn new(
         config: &Config,
