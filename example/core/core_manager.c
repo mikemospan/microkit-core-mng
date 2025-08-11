@@ -11,7 +11,7 @@ extern char bootstrap_end[];
 static void *memcpy(void *dst, const void *src, uint64_t sz);
 
 void init(void) {
-    microkit_dbg_puts("[PD 1]: Starting!\n");
+    microkit_dbg_puts("[Core Manager]: Starting!\n");
     uart_init();
     
     // Copy the entire bootstrap section to the bootstrap memory region.
@@ -78,8 +78,7 @@ void notified(microkit_channel ch) {
     microkit_irq_ack(ch);
 }
 
-static void *memcpy(void *dst, const void *src, uint64_t sz)
-{
+static void *memcpy(void *dst, const void *src, uint64_t sz) {
     char *dst_ = dst;
     const char *src_ = src;
     while (sz-- > 0) {
