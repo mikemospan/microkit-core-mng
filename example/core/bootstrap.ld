@@ -2,7 +2,7 @@
 
 SECTIONS
 {
-    .bootstrap : {
+    .bootstrap : ALIGN(4096) {
         bootstrap_start = .;
         *bootstrap_s.o(.*)  /* Assembly sections go first */
         *bootstrap_c.o(.*)  /* C sections go second */

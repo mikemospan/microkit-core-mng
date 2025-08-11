@@ -21,7 +21,7 @@ typedef void (*sel4_entry)(
 void el2_mmu_enable(void);
 
 /* Physical address to the underlying hardware page table */
-uintptr_t boot_lvl0_lower[1 << 9] ALIGN(1 << 12);
+uintptr_t boot_lvl0_lower = 0x60254000;
 /* Bootstrap data needed to later start the kernel */
 uintptr_t kernel_entry;
 uintptr_t ui_p_reg_start;
@@ -111,6 +111,7 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     puts("Enabling the MMU\n");
     el2_mmu_enable();
 
+    puts("Starting the seL4 kernel\n");
     start_kernel();
 
     puts("seL4 Loader: Error - KERNEL RETURNED (CPU ");

@@ -2,7 +2,7 @@
 <system>
     <memory_region name="uart" size="0x1_000" phys_addr="0x9_000_000"/>
     <memory_region name="buffer" size="0x1_000"/>
-    <memory_region name="bootstrap_mem" size="0x4_000" phys_addr="0x80_000_000"/>
+    <memory_region name="bootstrap_mem" size="0x6_000" phys_addr="0x80_000_000"/>
     
     <protection_domain name="core_manager" priority="254" smc="true">
         <program_image path="core_manager.elf"/>

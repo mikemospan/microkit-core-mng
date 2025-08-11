@@ -64,7 +64,7 @@
 
 /* Stack configuration */
 #define STACK_SIZE               0x1000      // 4KB per CPU
-#define STACK_BASE               0x80001000  // Base address for stacks
+#define STACK_BASE               0x80002000  // Base address for stacks
 
 /* Standard function decorators. */
 #define BEGIN_FUNC(_name) \
