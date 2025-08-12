@@ -64,7 +64,7 @@
 
 /* Stack configuration */
 #define STACK_SIZE               0x1000      // 4KB per CPU
-#define STACK_BASE               0x8000a000  // Base address for stacks
+#define STACK_BASE               0x80008000  // Base address for stacks
 
 /* Standard function decorators. */
 #define BEGIN_FUNC(_name) \
@@ -187,7 +187,7 @@ BEGIN_FUNC(bootstrap_start)
     // Stack formula: STACK_BASE + (cpu_id * STACK_SIZE) + STACK_SIZE
     lsl x1, x0, #12             // x1 = cpu_id * 4096
     movz x2, #0x8000, LSL #16   // Load STACK_BASE high bits
-    add x2, x2, #0xa000         // Add low bits (0x80002000)
+    add x2, x2, #0x8000         // Add low bits (0x80008000)
     add x1, x2, x1              // x1 = STACK_BASE + (cpu_id * STACK_SIZE)
     add x1, x1, #STACK_SIZE     // x1 = stack_top for this CPU
     and x1, x1, #~0xF           // Ensure 16-byte alignment
