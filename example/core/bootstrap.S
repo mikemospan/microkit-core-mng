@@ -63,8 +63,8 @@
 #define TCR_EL2_RES1      ((1 << 23) | (1 << 31))
 
 /* Stack configuration */
-#define STACK_SIZE               0x1000      // 4KB per CPU
-#define STACK_BASE               0x80008000  // Base address for stacks
+#define STACK_SIZE               0x1000      // 4KiB per CPU
+#define STACK_BITS               12          // 2^12 = 4KiB
 
 /* Standard function decorators. */
 #define BEGIN_FUNC(_name) \
@@ -185,13 +185,13 @@ BEGIN_FUNC(bootstrap_start)
 
     // Calculate stack pointer for this CPU
     // Stack formula: STACK_BASE + (cpu_id * STACK_SIZE) + STACK_SIZE
-    lsl x1, x0, #12             // x1 = cpu_id * 4096
-    movz x2, #0x8000, LSL #16   // Load STACK_BASE high bits
-    add x2, x2, #0x8000         // Add low bits (0x80008000)
-    add x1, x2, x1              // x1 = STACK_BASE + (cpu_id * STACK_SIZE)
-    add x1, x1, #STACK_SIZE     // x1 = stack_top for this CPU
-    and x1, x1, #~0xF           // Ensure 16-byte alignment
-    mov sp, x1
+    lsl x1, x0, #STACK_BITS        // x1 = cpu_id * 4096 (STACK_SIZE)
+    adrp x2, cpu_stacks            // load base page of cpu_stacks
+    add  x2, x2, :lo12:cpu_stacks  // add offset within page
+    add  x1, x2, x1                // x1 = base + cpu_id * STACK_SIZE
+    add  x1, x1, #STACK_SIZE       // x1 = top of stack for this CPU
+    mov  sp, x1
+
 
     bl secondary_cpu_entry
    
@@ -246,7 +246,7 @@ BEGIN_FUNC(el2_mmu_enable)
     isb
 
     /* Setup page tables */
-    adrp    x8, bootstrap_lvl0
+    adrp    x8, boot_lvl0_lower
     msr     ttbr0_el2, x8
     isb
 

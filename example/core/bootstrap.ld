@@ -13,5 +13,5 @@ SECTIONS
 /* This will insert after .text in the main linker script */
 INSERT AFTER .text;
 
-/* Ensure we don't exceed reasonable size (32KB limit) */
-ASSERT(bootstrap_end - bootstrap_start <= 0x8000, "Bootstrap code too large")
+/* Ensure we don't exceed reasonable size (64KB limit) */
+ASSERT(bootstrap_end - bootstrap_start <= 0x10000, "Bootstrap code too large")

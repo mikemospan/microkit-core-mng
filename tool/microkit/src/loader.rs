@@ -130,54 +130,49 @@ pub struct Loader<'a> {
 
 pub struct BootInfo {
     pub kernel_entry: u64,
-    pub ui_p_reg_start: u64,
-    pub ui_p_reg_end: u64,
-    pub pv_offset: u64,
-    pub v_entry: u64,
-    pub extra_device_addr_p: u64,
-    pub extra_device_size: u64,
+    pub first_vaddr: u64,
+    pub first_paddr: u64
 }
 
 impl<'a> Loader<'a> {
-    pub fn calculate_boot_info(
-        kernel_elf: &ElfFile,
-        initial_task_elf: &ElfFile,
-        initial_task_phys_base: Option<u64>,
-        reserved_region: MemoryRegion
-    ) -> BootInfo {
-        let initial_task_segments: Vec<_> = initial_task_elf
-            .segments
-            .iter()
-            .filter(|s| s.loadable)
-            .collect();
-        assert!(initial_task_segments.len() == 1);
-        let segment = &initial_task_segments[0];
+    pub fn calculate_boot_info(kernel_elf: &ElfFile) -> BootInfo {
+        let mut kernel_first_vaddr = None;
+        let mut kernel_last_vaddr = None;
+        let mut kernel_first_paddr = None;
+        let mut kernel_p_v_offset = None;
 
-        let inittask_first_vaddr = segment.virt_addr;
-        let inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size(), kb(4));
+        for segment in &kernel_elf.segments {
+            if segment.loadable {
+                if kernel_first_vaddr.is_none() || segment.virt_addr < kernel_first_vaddr.unwrap() {
+                    kernel_first_vaddr = Some(segment.virt_addr);
+                }
 
-        let inittask_first_paddr = match initial_task_phys_base {
-            Some(paddr) => paddr,
-            None => segment.phys_addr,
-        };
-        let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
+                if kernel_last_vaddr.is_none()
+                    || segment.virt_addr + segment.mem_size() > kernel_last_vaddr.unwrap()
+                {
+                    kernel_last_vaddr =
+                        Some(round_up(segment.virt_addr + segment.mem_size(), mb(2)));
+                }
 
-        let kernel_entry = kernel_elf.entry;
-        let ui_p_reg_start = inittask_first_paddr;
-        let ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset;
-        let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
-        let v_entry = initial_task_elf.entry;
-        let extra_device_addr_p = reserved_region.base;
-        let extra_device_size = reserved_region.size();
+                if kernel_first_paddr.is_none() || segment.phys_addr < kernel_first_paddr.unwrap() {
+                    kernel_first_paddr = Some(segment.phys_addr);
+                }
+
+                if kernel_p_v_offset.is_none() {
+                    kernel_p_v_offset = Some(segment.virt_addr - segment.phys_addr);
+                } else if kernel_p_v_offset.unwrap() != segment.virt_addr - segment.phys_addr {
+                    panic!("Kernel does not have a consistent physical to virtual offset");
+                }
+            }
+        }
+
+        assert!(kernel_first_vaddr.is_some());
+        assert!(kernel_first_paddr.is_some());
 
         BootInfo {
-            kernel_entry,
-            ui_p_reg_start,
-            ui_p_reg_end,
-            pv_offset,
-            v_entry,
-            extra_device_addr_p,
-            extra_device_size
+            kernel_entry: kernel_elf.entry,
+            first_vaddr:  kernel_first_vaddr.unwrap(),
+            first_paddr:  kernel_first_paddr.unwrap()
         }
     }
 }
