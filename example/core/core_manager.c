@@ -9,6 +9,7 @@ extern char bootstrap_start[];
 extern char bootstrap_end[];
 
 static void *memcpy(void *dst, const void *src, uint64_t sz);
+static uintptr_t get_page_table_addr(void);
 
 void init(void) {
     microkit_dbg_puts("[Core Manager]: Starting!\n");
@@ -17,6 +18,12 @@ void init(void) {
     // Copy the entire bootstrap section to the bootstrap memory region.
     uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
     memcpy((void*)bootstrap_vaddr, bootstrap_start, bootstrap_size);
+
+    uintptr_t boot_lvl0_lower = get_page_table_addr();
+
+    microkit_dbg_puts("[Core Manager]: Boot level 0 lower page table address: ");
+    uart_print_hex(boot_lvl0_lower);
+    microkit_dbg_puts("\n");
     
     asm volatile("dsb sy" ::: "memory");
 }
@@ -86,4 +93,15 @@ static void *memcpy(void *dst, const void *src, uint64_t sz) {
     }
 
     return dst;
+}
+
+#define PSCI_FN_PT_ADDR     0x8000FFFF
+
+static uintptr_t get_page_table_addr(void) {
+    seL4_ARM_SMCContext args = {.x0 = PSCI_FN_PT_ADDR};
+    seL4_ARM_SMCContext resp = {0};
+
+    microkit_arm_smc_call(&args, &resp);
+
+    return resp.x0;
 }
