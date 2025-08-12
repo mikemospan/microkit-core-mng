@@ -2,10 +2,9 @@
 
 #define ALIGN(n)  __attribute__((__aligned__(n)))
 
-#define UARTDR                 0x000
-#define PAGE_TABLE_SIZE (1 << 12)
-#define AARCH64_1GB_BLOCK_BITS 30
-#define AARCH64_2MB_BLOCK_BITS 21
+#define PAGE_TABLE_SIZE         (1 << 12)
+#define AARCH64_1GB_BLOCK_BITS  30
+#define AARCH64_2MB_BLOCK_BITS  21
 
 typedef void (*sel4_entry)(
     uintptr_t ui_p_reg_start,
@@ -34,9 +33,9 @@ uintptr_t dtb_size;
 uintptr_t extra_device_addr_p;
 uintptr_t extra_device_size;
 
-static void putc(int ch) {
+static inline void putc(int ch) {
     volatile uint32_t *uart_phys = (volatile uint32_t *)0x09000000;
-    uart_phys[UARTDR/4] = ch;
+    *uart_phys = ch;
 }
 
 static void puts(const char *str) {
@@ -62,7 +61,7 @@ static void put_hex64(uint64_t num) {
     }
 }
 
-static void start_kernel(void) {
+static inline void start_kernel(void) {
     ((sel4_entry)(kernel_entry))(
         ui_p_reg_start,
         ui_p_reg_end,
@@ -75,7 +74,7 @@ static void start_kernel(void) {
     );
 }
 
-static int current_el(void) {
+static inline int current_el(void) {
     /* See: C5.2.1 CurrentEL */
     uint32_t val;
     asm volatile("mrs %x0, CurrentEL" : "=r"(val) :: "cc");
