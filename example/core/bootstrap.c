@@ -62,8 +62,7 @@ static void put_hex64(uint64_t num) {
     }
 }
 
-static void start_kernel(void)
-{
+static void start_kernel(void) {
     ((sel4_entry)(kernel_entry))(
         ui_p_reg_start,
         ui_p_reg_end,
@@ -165,7 +164,7 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     puts("Starting the seL4 kernel\n");
     start_kernel();
 
-    puts("seL4 Loader: Error - KERNEL RETURNED (CPU ");
+    puts("[Core Manager]: Error - KERNEL RETURNED (CPU ");
     putc(cpu_id + '0');
     puts(")\n");
 

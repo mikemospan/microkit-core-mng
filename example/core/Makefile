@@ -9,7 +9,6 @@ LD := $(TOOLCHAIN)-ld
 AS := $(TOOLCHAIN)-as
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-CORE_MANAGER_OBJS := core_manager.o
 PD2_OBJS := pd2.o
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
 IMAGES := core_manager.elf pd2.elf
@@ -56,7 +55,7 @@ $(BUILD_DIR)/bootstrap_s.o: bootstrap.S Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
 # Link core_manager.elf including bootstrap object files
-$(BUILD_DIR)/core_manager.elf: $(addprefix $(BUILD_DIR)/, $(CORE_MANAGER_OBJS) $(BOOTSTRAP_OBJS))
+$(BUILD_DIR)/core_manager.elf: $(addprefix $(BUILD_DIR)/, core_manager.o $(BOOTSTRAP_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 # Link pd2.elf
