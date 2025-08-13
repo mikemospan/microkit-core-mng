@@ -429,7 +429,7 @@ impl<'a> Loader<'a> {
         ]
     }
 
-    pub fn aarch64_setup_pagetables(
+    fn aarch64_setup_pagetables(
         elf: &ElfFile,
         first_vaddr: u64,
         first_paddr: u64,
@@ -450,6 +450,29 @@ impl<'a> Loader<'a> {
             .find_symbol("boot_lvl0_upper")
             .expect("Could not find 'boot_lvl0_upper' symbol");
 
+        Loader::aarch64_setup_pagetables_with_addrs(boot_lvl1_lower_addr, boot_lvl1_lower_size,
+                                                    boot_lvl1_upper_addr, boot_lvl1_upper_size,
+                                                    boot_lvl2_upper_addr, boot_lvl2_upper_size,
+                                                    boot_lvl0_lower_addr, boot_lvl0_lower_size,
+                                                    boot_lvl0_upper_addr, boot_lvl0_upper_size,
+                                                    first_vaddr, first_paddr
+                                                )
+    }
+
+    pub fn aarch64_setup_pagetables_with_addrs(
+        boot_lvl1_lower_addr: u64,
+        boot_lvl1_lower_size: u64,
+        boot_lvl1_upper_addr: u64,
+        boot_lvl1_upper_size: u64,
+        boot_lvl2_upper_addr: u64,
+        boot_lvl2_upper_size: u64,
+        boot_lvl0_lower_addr: u64,
+        boot_lvl0_lower_size: u64,
+        boot_lvl0_upper_addr: u64,
+        boot_lvl0_upper_size: u64,
+        first_vaddr: u64,
+        first_paddr: u64,
+    ) -> Vec<(u64, u64, [u8; PAGE_TABLE_SIZE])> {
         let mut boot_lvl0_lower: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
         boot_lvl0_lower[..8].copy_from_slice(&(boot_lvl1_lower_addr | 3).to_le_bytes());
 
