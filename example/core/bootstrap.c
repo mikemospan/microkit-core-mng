@@ -5,6 +5,11 @@
 
 #define ALIGN(n)  __attribute__((__aligned__(n)))
 #define START_KERNEL() ((sel4_entry)(kernel_entry))(0, 0, 0, 0, 0, 0, 0, 0)
+/* Put the CPU into a low-power wait loop when failed */
+#define FAIL() \
+    for (;;) {          \
+        asm volatile("wfi"); \
+    }
 
 typedef void (*sel4_entry)(
     uintptr_t ui_p_reg_start,
@@ -84,7 +89,7 @@ void secondary_cpu_entry(uint64_t cpu_id) {
         asm volatile("msr cntvoff_el2, xzr");
     } else {
         puts("We're not in EL2!!\n");
-        goto fail;
+        FAIL();
     }
 
     /* Get this CPU's ID and save it to TPIDR_EL1 for seL4. */
@@ -105,10 +110,6 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     putc(cpu_id + '0');
     puts(")\n");
 
-fail:
     /* Note: can't usefully return to U-Boot once we are here. */
-    /* Put the CPU into a low-power wait loop */
-    for (;;) {
-        asm volatile("wfi");
-    }
+    FAIL();
 }
