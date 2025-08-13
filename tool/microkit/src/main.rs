@@ -11,8 +11,8 @@ use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::{
     elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
-    ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
-    VM_MAX_NAME_LENGTH,
+    core_manager::CoreManager, ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS,
+    PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
 };
 use sdf::{
     parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
@@ -3632,10 +3632,8 @@ fn main() -> Result<(), String> {
     report_buf.flush().unwrap();
 
     let core_manager_elf = &mut pd_elf_files[0];
-    let boot_info = Loader::calculate_boot_info(&kernel_elf);
-    core_manager_elf.write_symbol("kernel_entry", &boot_info.kernel_entry.to_le_bytes())?;
-    core_manager_elf.write_symbol("kernel_first_vaddr", &boot_info.first_vaddr.to_le_bytes())?;
-    core_manager_elf.write_symbol("kernel_first_paddr", &boot_info.first_paddr.to_le_bytes())?;
+    let mut core_manager = CoreManager::new(&kernel_elf, core_manager_elf);
+    core_manager.patch_elf().expect("Failed to patch core manager elf");
 
     let mut loader_regions: Vec<(u64, &[u8])> = vec![(
         built_system.reserved_region.base,

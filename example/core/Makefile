@@ -22,7 +22,7 @@ QEMU := qemu-system-aarch64
 
 BOOTSTRAP_OBJS := bootstrap_c.o bootstrap_s.o
 
-.PHONY: all clean qemu
+.PHONY: all clean qemu-debug
 
 # Ensure necessary environment variables are set
 ifeq ($(strip $(BUILD_DIR)),)
@@ -79,4 +79,17 @@ qemu: $(IMAGE_FILE)
 		-m size=2G \
 		-nographic \
 		-d in_asm,guest_errors \
+		-D qemu_debug.log
+
+qemu-debug: $(IMAGE_FILE)
+	if ! command -v $(QEMU) > /dev/null 2>&1; then echo "Could not find dependency: qemu-system-aarch64"; exit 1; fi
+	$(QEMU) -machine virt,virtualization=on,highmem=off,secure=off,gic-version=2 \
+		-cpu $(CPU) \
+		-serial mon:stdio \
+		-smp 4 \
+		-device loader,file=$(IMAGE_FILE),addr=0x70000000,cpu-num=0 \
+		-m size=2G \
+		-nographic \
+		-s -S \
+		-d guest_errors \
 		-D qemu_debug.log

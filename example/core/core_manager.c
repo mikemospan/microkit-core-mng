@@ -67,7 +67,7 @@ void notified(microkit_channel ch) {
         microkit_notify(PD2_CHANNEL);
         break;
     case 'y':
-        core_on(3, 0x40000000);
+        core_on(3, 0x80000000);
         break;
     case 'i':
         microkit_dbg_puts("[Core Manager]: Viewing status of core #3\n");

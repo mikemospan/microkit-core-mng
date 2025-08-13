@@ -73,7 +73,8 @@
 _name:
 
 #define END_FUNC(_name) \
-    .size _name, .-_name
+    .size _name, .-_name ; \
+_name##_end:
 
 /*
  * Disable the MMU.
