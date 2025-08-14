@@ -96,10 +96,6 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     puts("Enabling the MMU\n");
     el2_mmu_enable();
 
-    // For DEBUGING
-    // volatile uint64_t blah = 0;
-    // while (blah < 10000000) {}
-
     puts("Starting the seL4 kernel\n");
     START_KERNEL();
 
