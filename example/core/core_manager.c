@@ -68,6 +68,7 @@ void notified(microkit_channel ch) {
         break;
     case 'y':
         core_on(3, 0x80000000);
+        microkit_pd_restart(1, 0x200000);
         break;
     case 'i':
         microkit_dbg_puts("[Core Manager]: Viewing status of core #3\n");

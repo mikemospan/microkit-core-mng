@@ -2641,28 +2641,6 @@ fn build_system(
             },
         );
         system_invocations.push(tcb_cap_copy_invocation);
-    } else {
-        // Give all PDs access to all other PDs' TCBs
-        for (pd_idx, _) in system.protection_domains.iter().enumerate() {
-            let cnode_obj = &cnode_objs[pd_idx];
-
-            // For each PD, copy all other PDs' TCBs into its CSpace
-            for (other_pd_idx, _) in system.protection_domains.iter().enumerate() {
-                let cap_idx = BASE_PD_TCB_CAP + other_pd_idx as u64; // Using BASE_PD_TCB_CAP as starting index
-                system_invocations.push(Invocation::new(
-                    config,
-                    InvocationArgs::CnodeCopy {
-                        cnode: cnode_obj.cap_addr,
-                        dest_index: cap_idx,
-                        dest_depth: PD_CAP_BITS,
-                        src_root: root_cnode_cap,
-                        src_obj: pd_tcb_objs[other_pd_idx].cap_addr,
-                        src_depth: config.cap_address_bits,
-                        rights: Rights::All as u64,
-                    },
-                ));
-            }
-        }
     }
 
     // Set VSpace and CSpace

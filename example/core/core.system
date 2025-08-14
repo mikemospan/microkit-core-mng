@@ -10,16 +10,15 @@
         <map mr="buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="buffer_vaddr"/>
         <map mr="bootstrap_mem" vaddr="0x5000000" perms="rw" setvar_vaddr="bootstrap_vaddr"/>
         <irq irq="33" id="1"/>
-    </protection_domain>
-    
-    <protection_domain name="pd2" priority="253" smc="true">
-        <program_image path="pd2.elf"/>
-        <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
-        <map mr="buffer" vaddr="0x4000000" perms="r" setvar_vaddr="buffer_vaddr"/>
+        <protection_domain name="core_worker1" priority="253" smc="true" id="1">
+            <program_image path="core_worker.elf"/>
+            <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+            <map mr="buffer" vaddr="0x4000000" perms="r" setvar_vaddr="buffer_vaddr"/>
+        </protection_domain>
     </protection_domain>
     
     <channel>
-        <end pd="pd2" id="1"/>
+        <end pd="core_worker1" id="1"/>
         <end pd="core_manager" id="2"/>
     </channel>
 </system>

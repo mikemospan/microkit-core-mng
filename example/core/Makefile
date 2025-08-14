@@ -9,9 +9,8 @@ LD := $(TOOLCHAIN)-ld
 AS := $(TOOLCHAIN)-as
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-PD2_OBJS := pd2.o
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
-IMAGES := core_manager.elf pd2.elf
+IMAGES := core_manager.elf core_worker.elf
 CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include
 LDFLAGS := -L$(BOARD_DIR)/lib -T bootstrap.ld
 LIBS := -lmicrokit -Tmicrokit.ld
@@ -58,8 +57,8 @@ $(BUILD_DIR)/bootstrap_s.o: bootstrap.S Makefile
 $(BUILD_DIR)/core_manager.elf: $(addprefix $(BUILD_DIR)/, core_manager.o $(BOOTSTRAP_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
-# Link pd2.elf
-$(BUILD_DIR)/pd2.elf: $(addprefix $(BUILD_DIR)/, $(PD2_OBJS))
+# Link core_worker.elf
+$(BUILD_DIR)/core_worker.elf: $(addprefix $(BUILD_DIR)/, core_worker.o)
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 # Generate image and report

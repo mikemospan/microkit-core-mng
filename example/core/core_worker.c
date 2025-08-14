@@ -5,7 +5,7 @@
 uintptr_t buffer_vaddr;
 
 void init(void) {
-    microkit_dbg_puts("[PD 2]: Starting!\n");
+    microkit_dbg_puts("[Core Worker #1]: Starting!\n");
 }
 
 void notified(microkit_channel ch) {
@@ -23,7 +23,7 @@ void notified(microkit_channel ch) {
         core_migrate(1);
         break;
     case 'x':
-        microkit_dbg_puts("[PD 2]: Turning off core #");
+        microkit_dbg_puts("[Core Worker #1]: Turning off core #");
         uart_print_num(current_cpu);
         microkit_dbg_puts("\n");
         
