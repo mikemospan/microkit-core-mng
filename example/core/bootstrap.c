@@ -6,10 +6,7 @@
 #define ALIGN(n)  __attribute__((__aligned__(n)))
 #define START_KERNEL() ((sel4_entry)(kernel_entry))(0, 0, 0, 0, 0, 0, 0, 0)
 /* Put the CPU into a low-power wait loop when failed */
-#define FAIL() \
-    for (;;) {          \
-        asm volatile("wfi"); \
-    }
+#define FAIL() for (;;) { asm volatile("wfi"); }
 
 typedef void (*sel4_entry)(
     uintptr_t ui_p_reg_start,
@@ -30,13 +27,13 @@ uint64_t boot_lvl0_upper[512] ALIGN(4096);
 uint64_t boot_lvl1_lower[512] ALIGN(4096);
 uint64_t boot_lvl1_upper[512] ALIGN(4096);
 uint64_t boot_lvl2_upper[512] ALIGN(4096);
-/* Bootstrap data needed to start the kernel */
+/* Virtual memory into the kernel initialisation function */
 uintptr_t kernel_entry;
 /* Stack of each CPU core in the system */
 volatile uint8_t cpu_stacks[NUM_CPUS][STACK_SIZE] ALIGN(16);
 
 static inline void putc(int ch) {
-    volatile uint32_t *uart_phys = (volatile uint32_t *)0x09000000;
+    volatile uint32_t *uart_phys = (volatile uint32_t *)0x9000000;
     *uart_phys = ch;
 }
 
@@ -63,7 +60,7 @@ static void put_hex64(uint64_t num) {
     }
 }
 
-static inline int current_el(void) {
+static inline uint32_t current_el(void) {
     /* See: C5.2.1 CurrentEL */
     uint32_t val;
     asm volatile("mrs %x0, CurrentEL" : "=r"(val) :: "cc");
@@ -78,7 +75,7 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     putc(cpu_id + '0');
     putc('\n');
 
-    int el = current_el();
+    uint32_t el = current_el();
     puts("CurrentEL = EL");
     putc(el + '0');
     putc('\n');
