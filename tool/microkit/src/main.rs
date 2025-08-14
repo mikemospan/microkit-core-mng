@@ -663,7 +663,6 @@ fn emulate_kernel_boot(
     let partial_info = kernel_partial_boot(config, kernel_elf);
     let mut normal_memory = partial_info.normal_memory;
     let device_memory = partial_info.device_memory;
-    let boot_region = partial_info.boot_region;
 
     normal_memory.remove_region(initial_task_phys_region.base, initial_task_phys_region.end);
     normal_memory.remove_region(reserved_region.base, reserved_region.end);
@@ -711,7 +710,6 @@ fn emulate_kernel_boot(
     ]
     .concat();
     let normal_regions: Vec<MemoryRegion> = [
-        boot_region.aligned_power_of_two_regions(config, max_bits),
         normal_memory.aligned_power_of_two_regions(config, max_bits),
     ]
     .concat();
