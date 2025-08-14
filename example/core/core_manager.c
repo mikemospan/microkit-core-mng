@@ -79,6 +79,13 @@ void notified(microkit_channel ch) {
     microkit_irq_ack(ch);
 }
 
+seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo) {
+    microkit_dbg_puts("[Core Manager]: Received fault from worker. Restart and pray it works.");
+    microkit_pd_restart(child, 0x200000);
+    /* We explicitly restart the thread so we do not need to 'reply' to the fault. */
+    return seL4_False;
+}
+
 static void *memcpy(void *dst, const void *src, uint64_t sz) {
     char *dst_ = dst;
     const char *src_ = src;
