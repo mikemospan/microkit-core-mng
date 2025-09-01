@@ -53,8 +53,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
         microkit_pd_restart(core, PD_INIT_ENTRY);
         break;
     case CORE_OFF:
-        microkit_notify(core + 1);
-        break;
+    case CORE_POWERDOWN:
     case CORE_STANDBY:
         microkit_notify(core + 1);
         break;
@@ -120,7 +119,22 @@ static void core_status(uint8_t core) {
 
     microkit_arm_smc_call(&args, &response);
 
-    print_error(response);
+    int err = print_error(response);
+    if (!err) {
+        if (response.x0 == 0) {
+            microkit_dbg_puts("Core ");
+            microkit_dbg_putc('0' + core);
+            microkit_dbg_puts(" is ON\n");
+        } else if (response.x0 == 1) {
+            microkit_dbg_puts("Core ");
+            microkit_dbg_putc('0' + core);
+            microkit_dbg_puts(" is OFF\n");
+        } else if (response.x0 == 2) {
+            microkit_dbg_puts("Core ");
+            microkit_dbg_putc('0' + core);
+            microkit_dbg_puts(" is PENDING\n");
+        }
+    }
 }
 
 static void *memcpy(void *dst, const void *src, uint64_t sz) {

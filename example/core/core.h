@@ -2,20 +2,21 @@
 
 #include <microkit.h>
 
-#define PSCI_VERSION_FID 0x84000000
-#define PSCI_CPU_SUSPEND 0x84000001
-#define PSCI_CPU_OFF 0x84000002
+#define PSCI_VERSION_FID    0x84000000
+#define PSCI_CPU_SUSPEND    0x84000001
+#define PSCI_CPU_OFF        0x84000002
 
 #ifdef ARCH_aarch64
-#define PSCI_CPU_ON 0xC4000003
-#define PSCI_AFFINITY_INFO 0xC4000004
+#define PSCI_CPU_ON         0xC4000003
+#define PSCI_AFFINITY_INFO  0xC4000004
 #else
-#define PSCI_CPU_ON 0x84000003
-#define PSCI_AFFINITY_INFO 0x84000004
+#define PSCI_CPU_ON         0x84000003
+#define PSCI_AFFINITY_INFO  0x84000004
 #endif
 
 /* Possible Error Codes */
 #define PSCI_SUCCESS                0
+#define PSCI_E_NOT_SUPPORTED        ((unsigned long) -1)
 #define PSCI_E_INVALID_PARAMETERS   ((unsigned long) -2)
 #define PSCI_E_DENIED               ((unsigned long) -3)
 #define PSCI_E_ALREADY_ON           ((unsigned long) -4)
@@ -27,15 +28,17 @@
 typedef enum {
     CORE_ON,
     CORE_OFF,
+    CORE_POWERDOWN,
     CORE_STANDBY,
     CORE_MIGRATE,
     CORE_STATUS,
     CORE_DUMP,
 } Instruction;
 
-static void print_error(seL4_ARM_SMCContext response) {
+static int print_error(seL4_ARM_SMCContext response) {
     switch (response.x0) {
-    case PSCI_SUCCESS:
+    case PSCI_E_NOT_SUPPORTED:
+        microkit_dbg_puts("Your request is not supported.\n");
         break;
     case PSCI_E_INVALID_PARAMETERS:
         microkit_dbg_puts("Your request had invalid parameters.\n");
@@ -59,7 +62,8 @@ static void print_error(seL4_ARM_SMCContext response) {
         microkit_dbg_puts("The provided entry point address for the core is invalid.\n");
         break;
     default:
-        microkit_dbg_puts("Encountered an unexpected case.\n");
-        break;
+        return 0; // Assume it's not an error
     }
+
+    return 1;
 }

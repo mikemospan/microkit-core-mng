@@ -103,6 +103,14 @@ static void execute_command(char *cmd) {
         } else {
             microkit_dbg_puts("Usage: off <core_id>\n");
         }
+    } else if (str_eq(command, "powerdown")) {
+        char *arg = next_token(&p);
+        if (arg) {
+            uint8_t core_id = str_to_int(arg);
+            send_core_command(CORE_POWERDOWN, core_id, 0);
+        } else {
+            microkit_dbg_puts("Usage: powerdown <core_id>\n");
+        }
     } else if (str_eq(command, "standby")) {
         char *arg = next_token(&p);
         if (arg) {
@@ -145,6 +153,7 @@ static void print_help(void) {
         "dump <core_id>           : Dump the protection domains on a core\n"
         "migrate <pd_id> <core>   : Migrate a protection domain to a core\n"
         "off <core_id>            : Turn off a core\n"
+        "powerdown <core_id>      : Power down a core\n"
         "standby <core_id>        : Put a core in standby mode\n"
         "on <core_id>             : Turn on a core\n"
         "\n"
