@@ -10,7 +10,7 @@ AS := $(TOOLCHAIN)-as
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
-IMAGES := core_manager.elf core_worker.elf
+IMAGES := core_manager.elf core_manager_api.elf core_worker.elf
 CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include
 LDFLAGS := -L$(BOARD_DIR)/lib -T bootstrap.ld
 LIBS := -lmicrokit -Tmicrokit.ld
@@ -53,12 +53,16 @@ $(BUILD_DIR)/bootstrap_c.o: bootstrap.c Makefile
 $(BUILD_DIR)/bootstrap_s.o: bootstrap.S Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
-# Link core_manager.elf including bootstrap object files
-$(BUILD_DIR)/core_manager.elf: $(addprefix $(BUILD_DIR)/, core_manager.o $(BOOTSTRAP_OBJS))
+# Link core_manager_api.elf including bootstrap object files
+$(BUILD_DIR)/core_manager_api.elf: $(addprefix $(BUILD_DIR)/, core_manager_api.o $(BOOTSTRAP_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 # Link core_worker.elf
 $(BUILD_DIR)/core_worker.elf: $(addprefix $(BUILD_DIR)/, core_worker.o)
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
+
+# Link core_manager.elf
+$(BUILD_DIR)/core_manager.elf: $(addprefix $(BUILD_DIR)/, core_manager.o)
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 # Generate image and report

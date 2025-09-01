@@ -2235,6 +2235,55 @@ fn build_system(
         }
     }
 
+    // Mint access to the child scheduling context in CSpace of the Core Manager API PD
+    // TODO: Consider whether the core manager should always be the first pd?
+    for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
+        // Before doing anything, check if we are dealing with a child PD
+        if let Some(parent_idx) = maybe_child_pd.parent {
+            // We are dealing with a child PD, now check if the index of its parent
+            // matches this iteration's PD.
+            if parent_idx == 0 {
+                let cap_idx = BASE_SCHED_CONTEXT_CAP + maybe_child_pd.id.unwrap();
+                assert!(cap_idx < PD_CAP_SIZE);
+                system_invocations.push(Invocation::new(
+                    config,
+                    InvocationArgs::CnodeMint {
+                        cnode: cnode_objs[0].cap_addr,
+                        dest_index: cap_idx,
+                        dest_depth: PD_CAP_BITS,
+                        src_root: root_cnode_cap,
+                        src_obj: pd_sched_context_objs[maybe_child_idx].cap_addr,
+                        src_depth: config.cap_address_bits,
+                        rights: Rights::All as u64,
+                        badge: 0,
+                    },
+                ));
+            }
+        }
+    }
+
+    // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
+    // TODO: Consider whether the core manager should always be the first pd?
+    for (_, pd) in system.protection_domains.iter().enumerate() {
+        for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
+            let cap_idx = BASE_IRQ_CAP + sysirq.id;
+            assert!(cap_idx < PD_CAP_SIZE);
+            system_invocations.push(Invocation::new(
+                config,
+                InvocationArgs::CnodeMint {
+                    cnode: cnode_objs[0].cap_addr,
+                    dest_index: cap_idx,
+                    dest_depth: PD_CAP_BITS,
+                    src_root: root_cnode_cap,
+                    src_obj: *irq_cap_address,
+                    src_depth: config.cap_address_bits,
+                    rights: Rights::All as u64,
+                    badge: 0,
+                },
+            ));
+        }
+    }
+
     // Mint access to virtual machine TCBs in the CSpace of parent PDs
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
         if let Some(vm) = &pd.virtual_machine {
@@ -2533,35 +2582,21 @@ fn build_system(
         ));
     }
 
-    // Grant the sched context cap to each PD via cnode copy
-    for (pd_idx, _) in system.protection_domains.iter().enumerate() {
+    // Grant every sched control cap to the Core Manager API via cnode copy.
+    // TODO: Consider whether the core manager should always be the first pd?
+    for cpu_id in 0..config.cores {
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::CnodeCopy {
-                cnode: cnode_objs[pd_idx].cap_addr,
-                dest_index: BASE_SCHED_CONTEXT_CAP + pd_idx as u64,
+                cnode: cnode_objs[0].cap_addr,
+                dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
                 dest_depth: PD_CAP_BITS,
                 src_root: root_cnode_cap,
-                src_obj: pd_sched_context_objs[pd_idx].cap_addr,
+                src_obj: kernel_boot_info.sched_control_cap + cpu_id,
                 src_depth: config.cap_address_bits,
                 rights: Rights::All as u64,
             },
         ));
-
-        for cpu_id in 0..config.cores {
-            system_invocations.push(Invocation::new(
-                config,
-                InvocationArgs::CnodeCopy {
-                    cnode: cnode_objs[pd_idx].cap_addr,
-                    dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
-                    dest_depth: PD_CAP_BITS,
-                    src_root: root_cnode_cap,
-                    src_obj: kernel_boot_info.sched_control_cap + cpu_id,
-                    src_depth: config.cap_address_bits,
-                    rights: Rights::All as u64,
-                },
-            ));
-        }
     }
 
     for (vm_idx, vm) in virtual_machines.iter().enumerate() {
@@ -3609,7 +3644,7 @@ fn main() -> Result<(), String> {
 
     let core_manager_elf = &mut pd_elf_files[0];
     let mut core_manager = CoreManager::new(&kernel_elf, core_manager_elf);
-    core_manager.patch_elf().expect("Failed to patch core manager elf");
+    core_manager.patch_elf().expect("Failed to patch core manager api elf");
 
     let mut loader_regions: Vec<(u64, &[u8])> = vec![(
         built_system.reserved_region.base,

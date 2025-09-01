@@ -5,7 +5,7 @@
 /* Definitions for the PL011 UART. Adjust the base address as required. */
 uintptr_t uart_base_vaddr;
 
-#define UART_IRQ_CH 1
+#define UART_IRQ_CH 2
 
 #define RHR_MASK               0b111111111
 #define UARTDR                 0x000

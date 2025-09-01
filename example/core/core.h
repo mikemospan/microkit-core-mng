@@ -25,8 +25,6 @@
 #define PSCI_E_DISABLED             ((unsigned long) -8)
 #define PSCI_E_INVALID_ADDRESS      ((unsigned long) -9)
 
-int current_cpu = 0;
-
 static void print_psci_version() {
     seL4_ARM_SMCContext args = {0};
     seL4_ARM_SMCContext resp = {0};
@@ -155,17 +153,16 @@ static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
     }
 }
 
-static void core_migrate(int pd_id) {
-    current_cpu = (current_cpu + 1) % 4;
+static void core_migrate(uint8_t pd, uint8_t core) {
     microkit_dbg_puts("Migrating PD");
-    uart_print_num(pd_id + 1);
+    uart_print_num(pd);
     microkit_dbg_puts(" to CPU #");
-    uart_print_num(current_cpu);
+    uart_print_num(core);
     microkit_dbg_puts("\n");
 
     seL4_SchedControl_ConfigureFlags(
-        BASE_SCHED_CONTROL_CAP + current_cpu,
-        BASE_SCHED_CONTEXT_CAP + pd_id,
+        BASE_SCHED_CONTROL_CAP + core,
+        BASE_SCHED_CONTEXT_CAP + pd,
         microkit_pd_period,
         microkit_pd_budget,
         microkit_pd_extra_refills,

@@ -4,21 +4,38 @@
     <memory_region name="buffer" size="0x1_000"/>
     <memory_region name="bootstrap_mem" size="0x10_000" phys_addr="0x80_000_000"/>
     
-    <protection_domain name="core_manager" priority="254" smc="true">
-        <program_image path="core_manager.elf"/>
+    <protection_domain name="core_manager_api" priority="254" smc="true">
+        <program_image path="core_manager_api.elf"/>
         <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
-        <map mr="buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="buffer_vaddr"/>
         <map mr="bootstrap_mem" vaddr="0x5000000" perms="rw" setvar_vaddr="bootstrap_vaddr"/>
-        <irq irq="33" id="1"/>
+        <map mr="buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="buffer_vaddr"/>
         <protection_domain name="core_worker1" priority="253" smc="true" id="1">
             <program_image path="core_worker.elf"/>
-            <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <map mr="buffer" vaddr="0x4000000" perms="r" setvar_vaddr="buffer_vaddr"/>
         </protection_domain>
+        <protection_domain name="core_worker2" priority="253" smc="true" id="2">
+            <program_image path="core_worker.elf"/>
+            <map mr="buffer" vaddr="0x4000000" perms="r" setvar_vaddr="buffer_vaddr"/>
+        </protection_domain>
+        <protection_domain name="core_worker3" priority="253" smc="true" id="3">
+            <program_image path="core_worker.elf"/>
+            <map mr="buffer" vaddr="0x4000000" perms="r" setvar_vaddr="buffer_vaddr"/>
+        </protection_domain>
+    </protection_domain>
+
+    <protection_domain name="core_manager" priority="253">
+        <program_image path="core_manager.elf"/>
+        <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+        <irq irq="33" id="2"/>
     </protection_domain>
     
     <channel>
         <end pd="core_worker1" id="1"/>
-        <end pd="core_manager" id="2"/>
+        <end pd="core_manager_api" id="2"/>
+    </channel>
+
+    <channel>
+        <end pd="core_manager" id="1" pp="true"/>
+        <end pd="core_manager_api" id="1"/>
     </channel>
 </system>

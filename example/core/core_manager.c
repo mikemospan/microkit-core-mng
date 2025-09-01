@@ -1,97 +1,70 @@
 #include "core.h"
 
-#define PD2_CHANNEL 2
-
-uintptr_t buffer_vaddr;
-uintptr_t bootstrap_vaddr;
-
-extern char bootstrap_start[];
-extern char bootstrap_end[];
-
-static void *memcpy(void *dst, const void *src, uint64_t sz);
+#define API_CHANNEL 1
 
 void init(void) {
     microkit_dbg_puts("[Core Manager]: Starting!\n");
     uart_init();
-    
-    // Copy the entire bootstrap section to the bootstrap memory region.
-    uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
-    memcpy((void*)bootstrap_vaddr, bootstrap_start, bootstrap_size);
-    
-    asm volatile("dsb sy" ::: "memory");
 }
 
 void notified(microkit_channel ch) {
     if (ch != UART_IRQ_CH) {
-        microkit_dbg_puts("Received unexpected notification\n");
+        microkit_dbg_puts("Received unexpected notification: ");
+        microkit_dbg_put32(ch);
+        microkit_dbg_putc('\n');
         return;
     }
 
-    ((char *) buffer_vaddr)[0] = uart_get_char();
+    char input = uart_get_char();
     uart_handle_irq();
 
-    switch (((char *) buffer_vaddr)[0]) {
+    microkit_mr_set(1, 3);
+    microkit_mr_set(2, 1);
+
+    seL4_Bool ppc = 1;
+    switch (input) {
     case 'h':
         microkit_dbg_puts(
             "\n=== LIST OF COMMANDS ===\n"
             "h: help\n"
-            "p: print psci version\n"
             "i: view the status of core #0\n"
             "d: core dump\n"
-            "m: migrate core_manager\n"
-            "n: migrate pd2\n"
+            "m: migrate pd\n"
             "x: turn off pd2's core\n"
             "s: put pd2's core in standby\n"
             "y: turn on pd2's core\n"
         );
-        break;
-    case 'p':
-        print_psci_version();
+        ppc = 0;
         break;
     case 'd':
-        microkit_dbg_puts("=== THE FOLLOWING DUMP IS FOR PROTECTION DOMAINS RUNNING ON THE CORE MANAGER's CORE ===\n");
-        seL4_DebugDumpScheduler();
-        microkit_notify(PD2_CHANNEL);
+        microkit_mr_set(0, 5);
         break;
     case 's':
-        microkit_notify(PD2_CHANNEL);
+        microkit_mr_set(0, 2);
         break;
     case 'm':
-        core_migrate(0);
-        seL4_IRQHandler_SetCore(BASE_IRQ_CAP + UART_IRQ_CH, 2);
-        break;
-    case 'n':
-        microkit_notify(PD2_CHANNEL);
+        microkit_mr_set(0, 3);
         break;
     case 'x':
-        microkit_notify(PD2_CHANNEL);
+        microkit_mr_set(0, 1);
         break;
     case 'y':
-        core_on(3, 0x80000000);
-        microkit_pd_restart(1, 0x200000);
+        microkit_mr_set(0, 0);
         break;
     case 'i':
-        microkit_dbg_puts("[Core Manager]: Viewing status of core #3\n");
-        core_status(3);
+        microkit_mr_set(0, 4);
         break;
+    default:
+        microkit_dbg_puts("Not a valid command! Click 'h' to view all commands.\n");
+        ppc = 0;
     }
 
+    if (ppc) {
+        microkit_ppcall(API_CHANNEL, microkit_msginfo_new(0, 3));
+        seL4_Word success = microkit_mr_get(0);
+        if (success != 0) {
+            microkit_dbg_puts("Core Manager API did not succeed in your request.\n");
+        }
+    }
     microkit_irq_ack(ch);
-}
-
-seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo) {
-    microkit_dbg_puts("[Core Manager]: Received fault from worker. Restart and pray it works.");
-    microkit_pd_restart(child, 0x200000);
-    /* We explicitly restart the thread so we do not need to 'reply' to the fault. */
-    return seL4_False;
-}
-
-static void *memcpy(void *dst, const void *src, uint64_t sz) {
-    char *dst_ = dst;
-    const char *src_ = src;
-    while (sz-- > 0) {
-        *dst_++ = *src_++;
-    }
-
-    return dst;
 }

@@ -67,13 +67,6 @@ impl<'a> CoreManager<'a> {
 
         self.target_elf.write_symbol("kernel_entry", &self.kernel_elf.entry.to_le_bytes())?;
 
-        let (vaddr, size) = self.target_elf.find_symbol("boot_lvl0_lower")?;
-        if let Some(data) = self.target_elf.get_data(vaddr, size) {
-            println!("Boot L0 lower first 16 bytes: {:02x?}", &data[..16]);
-        } else {
-            println!("Failed to get data for boot_lvl0_lower");
-        }
-
         Ok(())
     }
 
