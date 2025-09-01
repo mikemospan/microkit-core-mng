@@ -1,31 +1,33 @@
+#include <stdint.h>
 #include "core.h"
 
-#define WORKER_CHANNEL  2
-#define PD_INIT_ENTRY   0x200000
-#define BOOTSTRAP_ENTRY 0x80000000
+#define PD_INIT_ENTRY           0x200000
+#define BOOTSTRAP_ENTRY         0x80000000
 
-enum Instruction {
-    CORE_ON,
-    CORE_OFF,
-    CORE_STANDBY,
-    CORE_MIGRATE,
-    CORE_STATUS,
-    CORE_DUMP,
-};
+#define BASE_SCHED_CONTEXT_CAP  394
+#define BASE_SCHED_CONTROL_CAP  458
 
-uintptr_t bootstrap_vaddr;
-uintptr_t buffer_vaddr;
+#define MAX_PDS                 63
+#define MAX_IRQS                64
+
+static void core_status(uint8_t core);
+static void core_migrate(uint8_t pd, uint8_t core);
+static void core_on(uint8_t core, seL4_Word cpu_bootstrap);
+
+void *bootstrap_vaddr;
+Instruction *instruction_vaddr;
 extern char bootstrap_start[];
 extern char bootstrap_end[];
+
+// Contains information whether any given PD has a given IRQ value set.
+seL4_Bool pd_irqs[MAX_PDS][MAX_IRQS];
 
 static void *memcpy(void *dst, const void *src, uint64_t sz);
 
 void init(void) {
-    microkit_dbg_puts("[Core Manager API]: Starting!\n");
-    
     // Copy the entire bootstrap section to the bootstrap memory region.
     uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
-    memcpy((void*)bootstrap_vaddr, bootstrap_start, bootstrap_size);
+    memcpy(bootstrap_vaddr, bootstrap_start, bootstrap_size);
     asm volatile("dsb sy" ::: "memory");
 
     // Migrate all worker PDs to relevant cores
@@ -40,34 +42,40 @@ void notified(microkit_channel ch) {
 }
 
 microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
-    enum Instruction code = microkit_mr_get(0);
+    instruction_vaddr[0] = microkit_mr_get(0);
     uint8_t core = microkit_mr_get(1);
     uint8_t pd = microkit_mr_get(2);
     int err = 0;
 
-    switch (code) {
+    switch (instruction_vaddr[0]) {
     case CORE_ON:
         core_on(core, BOOTSTRAP_ENTRY);
-        microkit_pd_restart(1, PD_INIT_ENTRY);
+        microkit_pd_restart(core, PD_INIT_ENTRY);
         break;
     case CORE_OFF:
-        ((char *) buffer_vaddr)[0] = 'x';
-        microkit_notify(WORKER_CHANNEL);
+        microkit_notify(core + 1);
         break;
     case CORE_STANDBY:
-        ((char *) buffer_vaddr)[0] = 's';
-        microkit_notify(WORKER_CHANNEL);
+        microkit_notify(core + 1);
         break;
     case CORE_MIGRATE:
         core_migrate(pd, core);
-        // seL4_IRQHandler_SetCore(BASE_IRQ_CAP + UART_IRQ_CH, core);
+        for (int i = 0; i < MAX_IRQS; i++) {
+            seL4_Bool irq_set = pd_irqs[pd][i];
+            if (irq_set) {
+                seL4_IRQHandler_SetCore(BASE_IRQ_CAP + i, core);
+            }
+        }
         break;
     case CORE_STATUS:
         core_status(core);
         break;
     case CORE_DUMP:
-        // TODO: Get every core worker to perform this dump
-        seL4_DebugDumpScheduler();
+        if (core == 0) {
+            seL4_DebugDumpScheduler();
+        } else {
+            microkit_notify(core + 1);
+        }
         break;
     default:
         err = 1;
@@ -79,10 +87,40 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
 }
 
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo) {
-    microkit_dbg_puts("[Core Manager API]: Received fault from worker. Restart and pray it works.");
+    microkit_dbg_puts("[Core Manager API]: Received fault from worker. Restart and pray it works.\n");
     microkit_pd_restart(child, PD_INIT_ENTRY);
     /* We explicitly restart the thread so we do not need to 'reply' to the fault. */
     return seL4_False;
+}
+
+static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
+    seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_ON, .x1 = core, .x2 = cpu_bootstrap};
+    seL4_ARM_SMCContext response = {0};
+
+    microkit_arm_smc_call(&args, &response);
+
+    print_error(response);
+}
+
+static void core_migrate(uint8_t pd, uint8_t core) {
+    seL4_SchedControl_ConfigureFlags(
+        BASE_SCHED_CONTROL_CAP + core,
+        BASE_SCHED_CONTEXT_CAP + pd,
+        microkit_pd_period,
+        microkit_pd_budget,
+        microkit_pd_extra_refills,
+        microkit_pd_badge,
+        microkit_pd_flags
+    );
+}
+
+static void core_status(uint8_t core) {
+    seL4_ARM_SMCContext args = {.x0 = PSCI_AFFINITY_INFO, .x1 = core};
+    seL4_ARM_SMCContext response = {0};
+
+    microkit_arm_smc_call(&args, &response);
+
+    print_error(response);
 }
 
 static void *memcpy(void *dst, const void *src, uint64_t sz) {

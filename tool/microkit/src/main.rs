@@ -416,6 +416,7 @@ pub fn pd_write_symbols(
         elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
         elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
 
+        // TODO: Figure out what to do with this?
         elf.write_symbol("microkit_pd_period", &pd.period.to_le_bytes())?;
         elf.write_symbol("microkit_pd_budget", &pd.budget.to_le_bytes())?;
         elf.write_symbol("microkit_pd_extra_refills", &0u64.to_le_bytes())?;
@@ -2264,10 +2265,12 @@ fn build_system(
 
     // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
     // TODO: Consider whether the core manager should always be the first pd?
-    for (_, pd) in system.protection_domains.iter().enumerate() {
+    let mut pd_irqs = [[false; MAX_PDS]; 64];
+    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
         for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
             let cap_idx = BASE_IRQ_CAP + sysirq.id;
             assert!(cap_idx < PD_CAP_SIZE);
+            pd_irqs[pd_idx][sysirq.id as usize] = true;
             system_invocations.push(Invocation::new(
                 config,
                 InvocationArgs::CnodeMint {
