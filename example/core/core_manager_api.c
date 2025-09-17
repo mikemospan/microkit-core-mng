@@ -60,8 +60,6 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
         break;
     case CORE_MIGRATE:
         core_migrate(pd, core);
-        // TODO: Have the Microkit tool inject the pd_irqs array into the api elf.
-        // This for loop currently does nothing as all values are false.
         for (int i = 0; i < MAX_IRQS; i++) {
             seL4_Bool irq_set = pd_irqs[pd][i];
             if (irq_set) {
