@@ -739,7 +739,7 @@ fn emulate_kernel_boot(
 
 fn build_system(
     config: &Config,
-    pd_elf_files: &Vec<ElfFile>,
+    pd_elf_files: &mut Vec<ElfFile>,
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
     system: &SystemDescription,
@@ -773,7 +773,7 @@ fn build_system(
     // from this area, which can then be made available to the appropriate
     // protection domains
     let mut pd_elf_size = 0;
-    for pd_elf in pd_elf_files {
+    for pd_elf in pd_elf_files.iter_mut() {
         for r in phys_mem_regions_from_elf(pd_elf, config.minimum_page_size) {
             pd_elf_size += r.size();
         }
@@ -2264,13 +2264,17 @@ fn build_system(
     }
 
     // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
-    // TODO: Consider whether the core manager should always be the first pd?
-    let mut pd_irqs = [[false; MAX_PDS]; 64];
+    // TODO: Consider whether the core manager should always be the first pd?   
+    let mut pd_irqs = [[false; 64]; MAX_PDS];
+
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
         for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
             let cap_idx = BASE_IRQ_CAP + sysirq.id;
             assert!(cap_idx < PD_CAP_SIZE);
+
+            // Mark that this PD has this IRQ
             pd_irqs[pd_idx][sysirq.id as usize] = true;
+
             system_invocations.push(Invocation::new(
                 config,
                 InvocationArgs::CnodeMint {
@@ -2286,6 +2290,21 @@ fn build_system(
             ));
         }
     }
+
+    // Flatten to bytes in C row-major order
+    let mut pd_irqs_bytes = Vec::with_capacity(MAX_PDS * 64);
+    for pd in &pd_irqs {
+        for &irq in pd {
+            pd_irqs_bytes.push(if irq { 1u8 } else { 0u8 });
+        }
+    }
+
+    // Sanity check: must exactly match symbol size
+    assert_eq!(pd_irqs_bytes.len(), MAX_PDS * 64);
+
+    // Write into the first ELF (core manager ELF)
+    let elf = &mut pd_elf_files[0];
+    elf.write_symbol("pd_irqs", &pd_irqs_bytes)?;
 
     // Mint access to virtual machine TCBs in the CSpace of parent PDs
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
@@ -2634,6 +2653,7 @@ fn build_system(
             },
         ));
     }
+
     for (vm_idx, vm) in virtual_machines.iter().enumerate() {
         for vcpu_idx in 0..vm.vcpus.len() {
             system_invocations.push(Invocation::new(
@@ -3447,7 +3467,7 @@ fn main() -> Result<(), String> {
     loop {
         built_system = build_system(
             &kernel_config,
-            &pd_elf_files,
+            &mut pd_elf_files,
             &kernel_elf,
             &monitor_elf,
             &system,

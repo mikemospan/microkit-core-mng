@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "core.h"
+#include "uart.h"
 
 #define PD_INIT_ENTRY           0x200000
 #define BOOTSTRAP_ENTRY         0x80000000
