@@ -11,7 +11,7 @@ MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
 IMAGES := core_manager.elf core_manager_api.elf core_worker.elf
-CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include
+CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include -DNUM_CPUS=$(NUM_CPUS)
 LDFLAGS := -L$(BOARD_DIR)/lib -T bootstrap.ld
 LIBS := -lmicrokit -Tmicrokit.ld
 
@@ -38,6 +38,10 @@ endif
 
 ifeq ($(strip $(MICROKIT_CONFIG)),)
 $(error MICROKIT_CONFIG must be specified)
+endif
+
+ifeq ($(strip $(NUM_CPUS)),)
+$(error NUM_CPUS must be specified)
 endif
 
 all: $(IMAGE_FILE)

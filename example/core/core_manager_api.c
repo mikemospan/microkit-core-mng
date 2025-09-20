@@ -28,12 +28,12 @@ uint64_t pd_period[MAX_PDS];
 static void *memcpy(void *dst, const void *src, uint64_t sz);
 
 void init(void) {
-    // Copy the entire bootstrap section to the bootstrap memory region.
+    /* Copy the entire bootstrap section to the bootstrap memory region. */
     uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
     memcpy(bootstrap_vaddr, bootstrap_start, bootstrap_size);
     asm volatile("dsb sy" ::: "memory");
 
-    // Migrate all worker PDs to relevant cores
+    /* Migrate all worker PDs to relevant cores */
     core_migrate(1, 1);
     core_migrate(2, 2);
     core_migrate(3, 3);

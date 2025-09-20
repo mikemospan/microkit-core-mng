@@ -1,6 +1,5 @@
 #include <stdint.h>
 
-#define NUM_CPUS 4
 #define STACK_SIZE 4096
 
 #define ALIGN(n)  __attribute__((__aligned__(n)))
