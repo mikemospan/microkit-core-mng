@@ -52,14 +52,6 @@ extern seL4_Word microkit_irqs;
 extern seL4_Word microkit_notifications;
 extern seL4_Word microkit_pps;
 
-/* These next 5 variables are needed to perform a `seL4_SchedControl_ConfigureFlags` call.
- * This is used to switch the CPU core a thread is running on (core-migration management). */
-extern seL4_Word microkit_pd_period;
-extern seL4_Word microkit_pd_budget;
-extern seL4_Word microkit_pd_extra_refills;
-extern seL4_Word microkit_pd_badge;
-extern seL4_Word microkit_pd_flags;
-
 /*
  * Output a single character on the debug console.
  */

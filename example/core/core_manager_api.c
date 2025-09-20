@@ -20,8 +20,10 @@ Instruction *instruction_vaddr;
 extern char bootstrap_start[];
 extern char bootstrap_end[];
 
-// Contains information whether any given PD has a given IRQ value set.
-seL4_Bool pd_irqs[MAX_PDS][MAX_IRQS];
+// Contains information necessary for core migration.
+uint64_t pd_irqs[MAX_PDS];
+uint64_t pd_budget[MAX_PDS];
+uint64_t pd_period[MAX_PDS];
 
 static void *memcpy(void *dst, const void *src, uint64_t sz);
 
@@ -61,8 +63,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     case CORE_MIGRATE:
         core_migrate(pd, core);
         for (int i = 0; i < MAX_IRQS; i++) {
-            seL4_Bool irq_set = pd_irqs[pd][i];
-            if (irq_set) {
+            if (pd_irqs[pd] & (1ULL << i)) {
                 seL4_IRQHandler_SetCore(BASE_IRQ_CAP + i, core);
             }
         }
@@ -106,11 +107,11 @@ static void core_migrate(uint8_t pd, uint8_t core) {
     seL4_SchedControl_ConfigureFlags(
         BASE_SCHED_CONTROL_CAP + core,
         BASE_SCHED_CONTEXT_CAP + pd,
-        microkit_pd_period,
-        microkit_pd_budget,
-        microkit_pd_extra_refills,
-        microkit_pd_badge,
-        microkit_pd_flags
+        pd_period[pd],
+        pd_budget[pd],
+        0,
+        0x100 + pd,
+        0
     );
 }
 
