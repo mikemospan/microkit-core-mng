@@ -26,7 +26,7 @@ void init(void) {
 
 void notified(microkit_channel ch) {
     if (ch != UART_IRQ_CH) {
-        microkit_dbg_puts("Received unexpected notification: ");
+        microkit_dbg_puts("[Core Manager]: Received unexpected notification: ");
         microkit_dbg_put32(ch);
         microkit_dbg_putc('\n');
         return;

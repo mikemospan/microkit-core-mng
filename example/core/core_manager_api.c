@@ -11,8 +11,9 @@
 #define MAX_PDS                 63
 #define MAX_IRQS                64
 
-static void core_status(uint8_t core);
-static void core_migrate(uint8_t pd, uint8_t core);
+static seL4_Word core_status(uint8_t core, seL4_Bool print);
+static inline void core_migrate(uint8_t pd, uint8_t core);
+static inline void monitor_migrate(uint8_t core);
 static void core_on(uint8_t core, seL4_Word cpu_bootstrap);
 
 void *bootstrap_vaddr;
@@ -25,6 +26,11 @@ uint64_t pd_irqs[MAX_PDS];
 uint64_t pd_budget[MAX_PDS];
 uint64_t pd_period[MAX_PDS];
 
+// The core the initial task (Monitor) is currently on
+uint8_t monitor_core = 0;
+// The number of cores that are on
+uint8_t cores_on = NUM_CPUS;
+
 static void *memcpy(void *dst, const void *src, uint64_t sz);
 
 void init(void) {
@@ -34,9 +40,9 @@ void init(void) {
     asm volatile("dsb sy" ::: "memory");
 
     /* Migrate all worker PDs to relevant cores */
-    core_migrate(1, 1);
-    core_migrate(2, 2);
-    core_migrate(3, 3);
+    core_migrate(2, 1);
+    core_migrate(3, 2);
+    core_migrate(4, 3);
 }
 
 void notified(microkit_channel ch) {
@@ -58,7 +64,19 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     case CORE_OFF:
     case CORE_POWERDOWN:
     case CORE_STANDBY:
-        microkit_notify(core + 1);
+        if (cores_on == 1) {
+            microkit_dbg_puts("Could not perform operation since only 1 core remains.");
+        } else if (core == monitor_core) {
+            for (uint8_t count = 0; count < NUM_CPUS; count++) {
+                monitor_core = (monitor_core + 1) % NUM_CPUS;
+                if (core_status(monitor_core, 0) == 0) {
+                    monitor_migrate(monitor_core);
+                    break;
+                }
+            }
+        }
+    case CORE_DUMP:
+        microkit_notify(core + 2);
         break;
     case CORE_MIGRATE:
         core_migrate(pd, core);
@@ -69,14 +87,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
         }
         break;
     case CORE_STATUS:
-        core_status(core);
-        break;
-    case CORE_DUMP:
-        if (core == 0) {
-            seL4_DebugDumpScheduler();
-        } else {
-            microkit_notify(core + 1);
-        }
+        core_status(core, 1);
         break;
     default:
         err = 1;
@@ -103,7 +114,7 @@ static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
     print_error(response);
 }
 
-static void core_migrate(uint8_t pd, uint8_t core) {
+static inline void core_migrate(uint8_t pd, uint8_t core) {
     seL4_SchedControl_ConfigureFlags(
         BASE_SCHED_CONTROL_CAP + core,
         BASE_SCHED_CONTEXT_CAP + pd,
@@ -115,14 +126,26 @@ static void core_migrate(uint8_t pd, uint8_t core) {
     );
 }
 
-static void core_status(uint8_t core) {
+static inline void monitor_migrate(uint8_t core) {
+    seL4_SchedControl_ConfigureFlags(
+        BASE_SCHED_CONTROL_CAP + core,
+        BASE_SCHED_CONTEXT_CAP + 63,
+        1000,
+        1000,
+        0,
+        0,
+        0
+    );
+}
+
+static seL4_Word core_status(uint8_t core, seL4_Bool print) {
     seL4_ARM_SMCContext args = {.x0 = PSCI_AFFINITY_INFO, .x1 = core};
     seL4_ARM_SMCContext response = {0};
 
     microkit_arm_smc_call(&args, &response);
 
     int err = print_error(response);
-    if (!err) {
+    if (!err && print) {
         if (response.x0 == 0) {
             microkit_dbg_puts("Core ");
             microkit_dbg_putc('0' + core);
@@ -137,6 +160,8 @@ static void core_status(uint8_t core) {
             microkit_dbg_puts(" is PENDING\n");
         }
     }
+
+    return response.x0;
 }
 
 static void *memcpy(void *dst, const void *src, uint64_t sz) {
