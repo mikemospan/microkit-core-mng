@@ -11,8 +11,8 @@ use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::{
     elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
-    ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
-    VM_MAX_NAME_LENGTH,
+    core_manager::CoreManager, ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS,
+    PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
 };
 use sdf::{
     parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
@@ -74,6 +74,7 @@ const INIT_CNODE_CAP_ADDRESS: u64 = 2;
 const INIT_VSPACE_CAP_ADDRESS: u64 = 3;
 const IRQ_CONTROL_CAP_ADDRESS: u64 = 4; // Singleton
 const INIT_ASID_POOL_CAP_ADDRESS: u64 = 6;
+const INIT_SHED_CONTEXT_CAP_ADDDRESS: u64 = 14;
 const SMC_CAP_ADDRESS: u64 = 15;
 
 // const ASID_CONTROL_CAP_ADDRESS: u64 = 5; // Singleton
@@ -386,6 +387,7 @@ pub fn pd_write_symbols(
 ) -> Result<(), String> {
     for (i, pd) in pds.iter().enumerate() {
         let elf = &mut pd_elf_files[i];
+
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf.write_symbol("microkit_name", &name[..name_length])?;
@@ -414,12 +416,6 @@ pub fn pd_write_symbols(
         elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
         elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
         elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
-
-        elf.write_symbol("microkit_pd_period", &pd.period.to_le_bytes())?;
-        elf.write_symbol("microkit_pd_budget", &pd.budget.to_le_bytes())?;
-        elf.write_symbol("microkit_pd_extra_refills", &0u64.to_le_bytes())?;
-        elf.write_symbol("microkit_pd_badge", &(0x100 + i as u64).to_le_bytes())?;
-        elf.write_symbol("microkit_pd_flags", &0u64.to_le_bytes())?;
 
         for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
             let value = pd_setvar_values[i][setvar_idx];
@@ -662,7 +658,6 @@ fn emulate_kernel_boot(
     let partial_info = kernel_partial_boot(config, kernel_elf);
     let mut normal_memory = partial_info.normal_memory;
     let device_memory = partial_info.device_memory;
-    let boot_region = partial_info.boot_region;
 
     normal_memory.remove_region(initial_task_phys_region.base, initial_task_phys_region.end);
     normal_memory.remove_region(reserved_region.base, reserved_region.end);
@@ -710,7 +705,6 @@ fn emulate_kernel_boot(
     ]
     .concat();
     let normal_regions: Vec<MemoryRegion> = [
-        boot_region.aligned_power_of_two_regions(config, max_bits),
         normal_memory.aligned_power_of_two_regions(config, max_bits),
     ]
     .concat();
@@ -739,7 +733,7 @@ fn emulate_kernel_boot(
 
 fn build_system(
     config: &Config,
-    pd_elf_files: &Vec<ElfFile>,
+    pd_elf_files: &mut Vec<ElfFile>,
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
     system: &SystemDescription,
@@ -773,7 +767,7 @@ fn build_system(
     // from this area, which can then be made available to the appropriate
     // protection domains
     let mut pd_elf_size = 0;
-    for pd_elf in pd_elf_files {
+    for pd_elf in pd_elf_files.iter_mut() {
         for r in phys_mem_regions_from_elf(pd_elf, config.minimum_page_size) {
             pd_elf_size += r.size();
         }
@@ -2236,6 +2230,120 @@ fn build_system(
         }
     }
 
+    /* --- START: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */
+    // TODO: Consider whether the core manager should always be the first pd?
+
+    // Mint access to the Monitor's scheduling context in CSpace of the Core Manager API PD
+    system_invocations.push(Invocation::new(
+        config,
+        InvocationArgs::CnodeMint {
+            cnode: cnode_objs[0].cap_addr,
+            dest_index: BASE_SCHED_CONTEXT_CAP + 63,
+            dest_depth: PD_CAP_BITS,
+            src_root: root_cnode_cap,
+            src_obj: INIT_SHED_CONTEXT_CAP_ADDDRESS,
+            src_depth: config.cap_address_bits,
+            rights: Rights::All as u64,
+            badge: 0,
+        },
+    ));
+
+    // Mint access to the Cofe Manager API's scheduling context in CSpace of the Core Manager API PD
+    system_invocations.push(Invocation::new(
+        config,
+        InvocationArgs::CnodeMint {
+            cnode: cnode_objs[0].cap_addr,
+            dest_index: BASE_SCHED_CONTEXT_CAP,
+            dest_depth: PD_CAP_BITS,
+            src_root: root_cnode_cap,
+            src_obj: pd_sched_context_objs[0].cap_addr,
+            src_depth: config.cap_address_bits,
+            rights: Rights::All as u64,
+            badge: 0,
+        },
+    ));
+
+    // Mint access to the child scheduling context in CSpace of the Core Manager API PD
+    for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
+        // Before doing anything, check if we are dealing with a child PD
+        if let Some(parent_idx) = maybe_child_pd.parent {
+            // We are dealing with a child PD, now check if the index of its parent
+            // matches this iteration's PD.
+            if parent_idx == 0 {
+                let cap_idx = BASE_SCHED_CONTEXT_CAP + maybe_child_pd.id.unwrap();
+                assert!(cap_idx < PD_CAP_SIZE);
+                system_invocations.push(Invocation::new(
+                    config,
+                    InvocationArgs::CnodeMint {
+                        cnode: cnode_objs[0].cap_addr,
+                        dest_index: cap_idx,
+                        dest_depth: PD_CAP_BITS,
+                        src_root: root_cnode_cap,
+                        src_obj: pd_sched_context_objs[maybe_child_idx].cap_addr,
+                        src_depth: config.cap_address_bits,
+                        rights: Rights::All as u64,
+                        badge: 0,
+                    },
+                ));
+            }
+        }
+    }
+
+    // Grant every sched control cap to the Core Manager API via cnode copy
+    for cpu_id in 0..config.cores {
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::CnodeCopy {
+                cnode: cnode_objs[0].cap_addr,
+                dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
+                dest_depth: PD_CAP_BITS,
+                src_root: root_cnode_cap,
+                src_obj: kernel_boot_info.sched_control_cap + cpu_id,
+                src_depth: config.cap_address_bits,
+                rights: Rights::All as u64,
+            },
+        ));
+    }
+
+    // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
+    for (_, pd) in system.protection_domains.iter().enumerate() {
+        for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
+            let cap_idx = BASE_IRQ_CAP + sysirq.id;
+            assert!(cap_idx < PD_CAP_SIZE);
+            system_invocations.push(Invocation::new(
+                config,
+                InvocationArgs::CnodeMint {
+                    cnode: cnode_objs[0].cap_addr,
+                    dest_index: cap_idx,
+                    dest_depth: PD_CAP_BITS,
+                    src_root: root_cnode_cap,
+                    src_obj: *irq_cap_address,
+                    src_depth: config.cap_address_bits,
+                    rights: Rights::All as u64,
+                    badge: 0,
+                },
+            ));
+        }
+    }
+
+    // Flatten irq bitmasks into bytes in C row-major order
+    let mut pd_irqs_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+    let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+    let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+    for pd in &system.protection_domains {
+        pd_irqs_bytes.extend_from_slice(&pd.irq_bits().to_le_bytes());
+        pd_budget_bytes.extend_from_slice(&pd.budget.to_le_bytes());
+        pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
+    }
+
+    // Write into the first ELF (core manager ELF)
+    let elf = &mut pd_elf_files[0];
+    elf.write_symbol("pd_irqs", &pd_irqs_bytes)?;
+    elf.write_symbol("pd_budget", &pd_budget_bytes)?;
+    elf.write_symbol("pd_period", &pd_period_bytes)?;
+
+    /* --- END: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */
+
     // Mint access to virtual machine TCBs in the CSpace of parent PDs
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
         if let Some(vm) = &pd.virtual_machine {
@@ -2534,37 +2642,6 @@ fn build_system(
         ));
     }
 
-    // Grant the sched context cap to each PD via cnode copy
-    for (pd_idx, _) in system.protection_domains.iter().enumerate() {
-        system_invocations.push(Invocation::new(
-            config,
-            InvocationArgs::CnodeCopy {
-                cnode: cnode_objs[pd_idx].cap_addr,
-                dest_index: BASE_SCHED_CONTEXT_CAP + pd_idx as u64,
-                dest_depth: PD_CAP_BITS,
-                src_root: root_cnode_cap,
-                src_obj: pd_sched_context_objs[pd_idx].cap_addr,
-                src_depth: config.cap_address_bits,
-                rights: Rights::All as u64,
-            },
-        ));
-
-        for cpu_id in 0..config.cores {
-            system_invocations.push(Invocation::new(
-                config,
-                InvocationArgs::CnodeCopy {
-                    cnode: cnode_objs[pd_idx].cap_addr,
-                    dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
-                    dest_depth: PD_CAP_BITS,
-                    src_root: root_cnode_cap,
-                    src_obj: kernel_boot_info.sched_control_cap + cpu_id,
-                    src_depth: config.cap_address_bits,
-                    rights: Rights::All as u64,
-                },
-            ));
-        }
-    }
-
     for (vm_idx, vm) in virtual_machines.iter().enumerate() {
         for (vcpu_idx, vcpu) in vm.vcpus.iter().enumerate() {
             let idx = vm_idx + vcpu_idx;
@@ -2597,6 +2674,7 @@ fn build_system(
             },
         ));
     }
+
     for (vm_idx, vm) in virtual_machines.iter().enumerate() {
         for vcpu_idx in 0..vm.vcpus.len() {
             system_invocations.push(Invocation::new(
@@ -2642,28 +2720,6 @@ fn build_system(
             },
         );
         system_invocations.push(tcb_cap_copy_invocation);
-    } else {
-        // Give all PDs access to all other PDs' TCBs
-        for (pd_idx, _) in system.protection_domains.iter().enumerate() {
-            let cnode_obj = &cnode_objs[pd_idx];
-
-            // For each PD, copy all other PDs' TCBs into its CSpace
-            for (other_pd_idx, _) in system.protection_domains.iter().enumerate() {
-                let cap_idx = BASE_PD_TCB_CAP + other_pd_idx as u64; // Using BASE_PD_TCB_CAP as starting index
-                system_invocations.push(Invocation::new(
-                    config,
-                    InvocationArgs::CnodeCopy {
-                        cnode: cnode_obj.cap_addr,
-                        dest_index: cap_idx,
-                        dest_depth: PD_CAP_BITS,
-                        src_root: root_cnode_cap,
-                        src_obj: pd_tcb_objs[other_pd_idx].cap_addr,
-                        src_depth: config.cap_address_bits,
-                        rights: Rights::All as u64,
-                    },
-                ));
-            }
-        }
     }
 
     // Set VSpace and CSpace
@@ -3432,7 +3488,7 @@ fn main() -> Result<(), String> {
     loop {
         built_system = build_system(
             &kernel_config,
-            &pd_elf_files,
+            &mut pd_elf_files,
             &kernel_elf,
             &monitor_elf,
             &system,
@@ -3629,6 +3685,10 @@ fn main() -> Result<(), String> {
         }
     }
     report_buf.flush().unwrap();
+
+    let core_manager_elf = &mut pd_elf_files[0];
+    let mut core_manager = CoreManager::new(&kernel_elf, core_manager_elf);
+    core_manager.patch_elf().expect("Failed to patch core manager api elf");
 
     let mut loader_regions: Vec<(u64, &[u8])> = vec![(
         built_system.reserved_region.base,

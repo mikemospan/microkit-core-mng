@@ -6,6 +6,7 @@
 
 pub mod elf;
 pub mod loader;
+pub mod core_manager;
 pub mod sdf;
 pub mod sel4;
 pub mod util;
