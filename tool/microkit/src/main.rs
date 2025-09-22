@@ -74,6 +74,7 @@ const INIT_CNODE_CAP_ADDRESS: u64 = 2;
 const INIT_VSPACE_CAP_ADDRESS: u64 = 3;
 const IRQ_CONTROL_CAP_ADDRESS: u64 = 4; // Singleton
 const INIT_ASID_POOL_CAP_ADDRESS: u64 = 6;
+const INIT_SHED_CONTEXT_CAP_ADDDRESS: u64 = 14;
 const SMC_CAP_ADDRESS: u64 = 15;
 
 // const ASID_CONTROL_CAP_ADDRESS: u64 = 5; // Singleton
@@ -2229,8 +2230,40 @@ fn build_system(
         }
     }
 
-    // Mint access to the child scheduling context in CSpace of the Core Manager API PD
+    /* --- START: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */
     // TODO: Consider whether the core manager should always be the first pd?
+
+    // Mint access to the Monitor's scheduling context in CSpace of the Core Manager API PD
+    system_invocations.push(Invocation::new(
+        config,
+        InvocationArgs::CnodeMint {
+            cnode: cnode_objs[0].cap_addr,
+            dest_index: BASE_SCHED_CONTEXT_CAP + 63,
+            dest_depth: PD_CAP_BITS,
+            src_root: root_cnode_cap,
+            src_obj: INIT_SHED_CONTEXT_CAP_ADDDRESS,
+            src_depth: config.cap_address_bits,
+            rights: Rights::All as u64,
+            badge: 0,
+        },
+    ));
+
+    // Mint access to the Cofe Manager API's scheduling context in CSpace of the Core Manager API PD
+    system_invocations.push(Invocation::new(
+        config,
+        InvocationArgs::CnodeMint {
+            cnode: cnode_objs[0].cap_addr,
+            dest_index: BASE_SCHED_CONTEXT_CAP,
+            dest_depth: PD_CAP_BITS,
+            src_root: root_cnode_cap,
+            src_obj: pd_sched_context_objs[0].cap_addr,
+            src_depth: config.cap_address_bits,
+            rights: Rights::All as u64,
+            badge: 0,
+        },
+    ));
+
+    // Mint access to the child scheduling context in CSpace of the Core Manager API PD
     for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
         // Before doing anything, check if we are dealing with a child PD
         if let Some(parent_idx) = maybe_child_pd.parent {
@@ -2256,8 +2289,23 @@ fn build_system(
         }
     }
 
+    // Grant every sched control cap to the Core Manager API via cnode copy
+    for cpu_id in 0..config.cores {
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::CnodeCopy {
+                cnode: cnode_objs[0].cap_addr,
+                dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
+                dest_depth: PD_CAP_BITS,
+                src_root: root_cnode_cap,
+                src_obj: kernel_boot_info.sched_control_cap + cpu_id,
+                src_depth: config.cap_address_bits,
+                rights: Rights::All as u64,
+            },
+        ));
+    }
+
     // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
-    // TODO: Consider whether the core manager should always be the first pd?
     for (_, pd) in system.protection_domains.iter().enumerate() {
         for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
             let cap_idx = BASE_IRQ_CAP + sysirq.id;
@@ -2293,6 +2341,8 @@ fn build_system(
     elf.write_symbol("pd_irqs", &pd_irqs_bytes)?;
     elf.write_symbol("pd_budget", &pd_budget_bytes)?;
     elf.write_symbol("pd_period", &pd_period_bytes)?;
+
+    /* --- END: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */
 
     // Mint access to virtual machine TCBs in the CSpace of parent PDs
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
@@ -2588,23 +2638,6 @@ fn build_system(
                 extra_refills: 0,
                 badge: 0x100 + pd_idx as u64,
                 flags: 0,
-            },
-        ));
-    }
-
-    // Grant every sched control cap to the Core Manager API via cnode copy.
-    // TODO: Consider whether the core manager should always be the first pd?
-    for cpu_id in 0..config.cores {
-        system_invocations.push(Invocation::new(
-            config,
-            InvocationArgs::CnodeCopy {
-                cnode: cnode_objs[0].cap_addr,
-                dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
-                dest_depth: PD_CAP_BITS,
-                src_root: root_cnode_cap,
-                src_obj: kernel_boot_info.sched_control_cap + cpu_id,
-                src_depth: config.cap_address_bits,
-                rights: Rights::All as u64,
             },
         ));
     }
