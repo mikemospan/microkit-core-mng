@@ -2248,7 +2248,7 @@ fn build_system(
         },
     ));
 
-    // Mint access to the Cofe Manager API's scheduling context in CSpace of the Core Manager API PD
+    // Mint access to the Core Manager API's scheduling context in CSpace of the Core Manager API PD
     system_invocations.push(Invocation::new(
         config,
         InvocationArgs::CnodeMint {

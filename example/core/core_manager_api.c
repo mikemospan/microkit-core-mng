@@ -66,6 +66,8 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     case CORE_STANDBY:
         if (cores_on == 1) {
             microkit_dbg_puts("Could not perform operation since only 1 core remains.");
+            err = 1;
+            break;
         } else if (core == monitor_core) {
             for (uint8_t count = 0; count < NUM_CPUS; count++) {
                 monitor_core = (monitor_core + 1) % NUM_CPUS;
