@@ -1,6 +1,5 @@
 #include <stdint.h>
 #include "core.h"
-#include "uart.h"
 
 #define PD_INIT_ENTRY           0x200000
 #define BOOTSTRAP_ENTRY         0x80000000
@@ -69,13 +68,9 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
             err = 1;
             break;
         } else if (core == monitor_core) {
-            for (uint8_t count = 0; count < NUM_CPUS; count++) {
-                monitor_core = (monitor_core + 1) % NUM_CPUS;
-                if (core_status(monitor_core, 0) == 0) {
-                    monitor_migrate(monitor_core);
-                    break;
-                }
-            }
+            microkit_dbg_puts("Could not perform operation since the core being powered down contains the Monitor.");
+            err = 1;
+            break;
         }
     case CORE_DUMP:
         microkit_notify(core + 2);
@@ -87,6 +82,10 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
                 seL4_IRQHandler_SetCore(BASE_IRQ_CAP + i, core);
             }
         }
+        break;
+    case CORE_MIGRATE_MONITOR:
+        monitor_core = core;
+        monitor_migrate(monitor_core);
         break;
     case CORE_STATUS:
         core_status(core, 1);
@@ -130,13 +129,7 @@ static inline void core_migrate(uint8_t pd, uint8_t core) {
 
 static inline void monitor_migrate(uint8_t core) {
     seL4_SchedControl_ConfigureFlags(
-        BASE_SCHED_CONTROL_CAP + core,
-        BASE_SCHED_CONTEXT_CAP + 63,
-        1000,
-        1000,
-        0,
-        0,
-        0
+        BASE_SCHED_CONTROL_CAP + core, BASE_SCHED_CONTEXT_CAP + 63, 1000, 1000, 0, 0, 0
     );
 }
 

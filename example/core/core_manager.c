@@ -61,8 +61,7 @@ static void handle_user_input(char input) {
 }
 
 static void execute_command(char *cmd) {
-    char *p = cmd;
-    char *command = next_token(&p);
+    char *command = next_token(&cmd);
     if (!command) {
         return;
     }
@@ -70,7 +69,7 @@ static void execute_command(char *cmd) {
     if (str_eq(command, "help")) {
         print_help();
     } else if (str_eq(command, "status")) {
-        char *arg = next_token(&p);
+        char *arg = next_token(&cmd);
         if (arg) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_STATUS, core_id, 0);
@@ -78,7 +77,7 @@ static void execute_command(char *cmd) {
             microkit_dbg_puts("Usage: status <core_id>\n");
         }
     } else if (str_eq(command, "dump")) {
-        char *arg = next_token(&p);
+        char *arg = next_token(&cmd);
         if (arg) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_DUMP, core_id, 0);
@@ -86,17 +85,20 @@ static void execute_command(char *cmd) {
             microkit_dbg_puts("Usage: dump <core_id>\n");
         }
     } else if (str_eq(command, "migrate")) {
-        char *pd_arg = next_token(&p);
-        char *core_arg = next_token(&p);
-        if (pd_arg && core_arg) {
+        char *pd_arg = next_token(&cmd);
+        char *core_arg = next_token(&cmd);
+        if (pd_arg && str_eq(pd_arg, "monitor") && core_arg) {
+            uint8_t core_id = str_to_int(core_arg);
+            send_core_command(CORE_MIGRATE_MONITOR, core_id, 0);
+        } else if (pd_arg && core_arg) {
             uint8_t pd_id = str_to_int(pd_arg);
             uint8_t core_id = str_to_int(core_arg);
             send_core_command(CORE_MIGRATE, core_id, pd_id);
         } else {
-            microkit_dbg_puts("Usage: migrate <pd_id> <core_id>\n");
+            microkit_dbg_puts("Usage: migrate <pd_id> <core> OR migrate monitor <core>\n");
         }
     } else if (str_eq(command, "off")) {
-        char *arg = next_token(&p);
+        char *arg = next_token(&cmd);
         if (arg) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_OFF, core_id, 0);
@@ -104,7 +106,7 @@ static void execute_command(char *cmd) {
             microkit_dbg_puts("Usage: off <core_id>\n");
         }
     } else if (str_eq(command, "powerdown")) {
-        char *arg = next_token(&p);
+        char *arg = next_token(&cmd);
         if (arg) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_POWERDOWN, core_id, 0);
@@ -112,7 +114,7 @@ static void execute_command(char *cmd) {
             microkit_dbg_puts("Usage: powerdown <core_id>\n");
         }
     } else if (str_eq(command, "standby")) {
-        char *arg = next_token(&p);
+        char *arg = next_token(&cmd);
         if (arg) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_STANDBY, core_id, 0);
@@ -120,7 +122,7 @@ static void execute_command(char *cmd) {
             microkit_dbg_puts("Usage: standby <core_id>\n");
         }
     } else if (str_eq(command, "on")) {
-        char *arg = next_token(&p);
+        char *arg = next_token(&cmd);
         if (arg) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_ON, core_id, 0);
@@ -152,6 +154,7 @@ static void print_help(void) {
         "status <core_id>         : View the status of a core\n"
         "dump <core_id>           : Dump the protection domains on a core\n"
         "migrate <pd_id> <core>   : Migrate a protection domain to a core\n"
+        "migrate monitor <core>   : Migrate the monitor to a specific core\n"
         "off <core_id>            : Turn off a core\n"
         "powerdown <core_id>      : Power down a core\n"
         "standby <core_id>        : Put a core in standby mode\n"

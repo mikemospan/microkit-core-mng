@@ -31,6 +31,7 @@ typedef enum {
     CORE_POWERDOWN,
     CORE_STANDBY,
     CORE_MIGRATE,
+    CORE_MIGRATE_MONITOR,
     CORE_STATUS,
     CORE_DUMP,
 } Instruction;
