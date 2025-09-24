@@ -100,9 +100,46 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
 }
 
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo) {
-    microkit_dbg_puts("[Core Manager API]: Received fault from worker. Restart and pray it works.\n");
-    microkit_pd_restart(child, PD_INIT_ENTRY);
-    /* We explicitly restart the thread so we do not need to 'reply' to the fault. */
+    microkit_dbg_puts("[Core Manager API]: Received ");
+
+    seL4_Word fault = microkit_msginfo_get_label(msginfo);
+
+    switch (fault) {
+    case seL4_Fault_NullFault:
+        microkit_dbg_puts("seL4_Fault_NullFault");
+        break;
+    case seL4_Fault_CapFault:
+        microkit_dbg_puts("seL4_Fault_CapFault");
+        break;
+    case seL4_Fault_UnknownSyscall:
+        microkit_dbg_puts("seL4_Fault_UnknownSyscall");
+        break;
+    case seL4_Fault_UserException:
+        microkit_dbg_puts("seL4_Fault_UserException");
+        break;
+    case seL4_Fault_Timeout:
+        microkit_dbg_puts("seL4_Fault_Timeout");
+        break;
+    case seL4_Fault_VMFault:
+        microkit_dbg_puts("seL4_Fault_VMFault");
+        break;
+    case seL4_Fault_VGICMaintenance:
+        microkit_dbg_puts("seL4_Fault_VGICMaintenance");
+        break;
+    case seL4_Fault_VCPUFault:
+        microkit_dbg_puts("seL4_Fault_VCPUFault");
+        break;
+    case seL4_Fault_VPPIEvent:
+        microkit_dbg_puts("seL4_Fault_VPPIEvent");
+        break;
+    default:
+        microkit_dbg_puts("unknown fault");
+        break;
+    }
+
+    microkit_dbg_puts(" fault from child PD.\n");
+
+    /* Don't reply to fault; crash. */
     return seL4_False;
 }
 
