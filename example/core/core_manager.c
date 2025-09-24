@@ -79,7 +79,9 @@ static void handle_user_input(char input) {
 // === Command execution ===
 static void execute_command(char *cmd) {
     char *command = next_token(&cmd);
-    if (!command) return;
+    if (!command) {
+        return;
+    }
 
     seL4_Bool err = 0;
 
@@ -106,8 +108,9 @@ static void execute_command(char *cmd) {
         if (pd_arg && str_eq(pd_arg, "monitor") && core_arg) {
             uint8_t core_id = str_to_int(core_arg);
             err = send_core_command(CORE_MIGRATE_MONITOR, core_id, 0);
-            if (!err) monitor_core = core_id;
-
+            if (!err) {
+                monitor_core = core_id;
+            }
         } else if (pd_arg && core_arg) {
             uint8_t pd_id = str_to_int(pd_arg);
             uint8_t core_id = str_to_int(core_arg);
@@ -123,25 +126,39 @@ static void execute_command(char *cmd) {
         }
     } else if (str_eq(command, "off")) {
         char *arg = next_token(&cmd);
-        if (arg) err = send_core_command(CORE_OFF, str_to_int(arg), 0);
-        else uart_puts("Usage: off <core_id>\n");
+        if (arg) {
+            err = send_core_command(CORE_OFF, str_to_int(arg), 0);
+        } else {
+            uart_puts("Usage: off <core_id>\n");
+        }
     } else if (str_eq(command, "powerdown")) {
         char *arg = next_token(&cmd);
-        if (arg) err = send_core_command(CORE_POWERDOWN, str_to_int(arg), 0);
-        else uart_puts("Usage: powerdown <core_id>\n");
+        if (arg) {
+            err = send_core_command(CORE_POWERDOWN, str_to_int(arg), 0);
+        } else {
+            uart_puts("Usage: powerdown <core_id>\n");
+        }
     } else if (str_eq(command, "standby")) {
         char *arg = next_token(&cmd);
-        if (arg) err = send_core_command(CORE_STANDBY, str_to_int(arg), 0);
-        else uart_puts("Usage: standby <core_id>\n");
+        if (arg) {
+            err = send_core_command(CORE_STANDBY, str_to_int(arg), 0);
+        } else {
+            uart_puts("Usage: standby <core_id>\n");
+        }
     } else if (str_eq(command, "on")) {
         char *arg = next_token(&cmd);
-        if (arg) err = send_core_command(CORE_ON, str_to_int(arg), 0);
-        else uart_puts("Usage: on <core_id>\n");
+        if (arg) {
+            err = send_core_command(CORE_ON, str_to_int(arg), 0);
+        } else {
+            uart_puts("Usage: on <core_id>\n");
+        }
     } else {
         uart_puts("Unknown command. Type 'help' for a list of commands.\n");
     }
 
-    if (err) uart_puts("Core Manager API request failed.\n");
+    if (err) {
+        uart_puts("Core Manager API request failed.\n");
+    }
 }
 
 // === Core command interface ===
@@ -171,7 +188,9 @@ static void dump_core(uint8_t core) {
     uart_put64(core);
     uart_puts(" ===\nPD ID\tName\n----------------------\n");
 
-    if (core == monitor_core) uart_puts("\tMicrokit Monitor\n");
+    if (core == monitor_core) {
+        uart_puts("\tMicrokit Monitor\n");
+    }
 
     for (int pd_id = 0; pd_id < MAX_PDS; pd_id++) {
         char *name = core_pds[core][pd_id];
@@ -204,30 +223,56 @@ static void print_help(void) {
 
 // === String helpers ===
 static int str_eq(const char *a, const char *b) {
-    while (*a && *b && *a == *b) a++, b++;
+    while (*a && *b && *a == *b) {
+        a++;
+        b++;
+    }
     return (*a == '\0' && *b == '\0');
 }
 
 static char *skip_ws(char *p) {
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
     return p;
 }
 
 static char *next_token(char **p) {
     char *start = skip_ws(*p);
-    if (*start == '\0') { *p = start; return seL4_Null; }
+    if (*start == '\0') {
+        *p = start;
+        return seL4_Null;
+    }
 
     char *end = start;
-    while (*end && *end != ' ' && *end != '\t' && *end != '\r' && *end != '\n') end++;
+    while (*end && *end != ' ' && *end != '\t' && *end != '\r' && *end != '\n') {
+        end++;
+    }
 
-    if (*end) { *end = '\0'; end++; }
+    if (*end) {
+        *end = '\0';
+        end++;
+    }
     *p = end;
     return start;
 }
 
 static int str_to_int(const char *s) {
-    int val = 0, is_negative = 0;
-    if (*s == '-') { is_negative = 1; s++; }
-    while (*s >= '0' && *s <= '9') val = val * 10 + (*s++ - '0');
-    return is_negative ? -val : val;
+    int val = 0;
+    int is_negative = 0;
+
+    if (*s == '-') {
+        is_negative = 1;
+        s++;
+    }
+
+    while (*s >= '0' && *s <= '9') {
+        val = val * 10 + (*s - '0');
+        s++;
+    }
+
+    if (is_negative) {
+        return -val;
+    }
+    return val;
 }
