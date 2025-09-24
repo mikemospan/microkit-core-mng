@@ -26,15 +26,15 @@ void init(void) {
 
 void notified(microkit_channel ch) {
     if (ch != UART_IRQ_CH) {
-        microkit_dbg_puts("[Core Manager]: Received unexpected notification: ");
-        microkit_dbg_put32(ch);
-        microkit_dbg_putc('\n');
+        uart_puts("[Core Manager]: Received unexpected notification: ");
+        uart_put64(ch);
+        uart_putc('\n');
         return;
     }
 
-    char input = uart_get_char();
+    char input = uart_getchar();
     uart_handle_irq();
-    uart_put_char(input);
+    uart_putc(input);
     
     handle_user_input(input);
     microkit_irq_ack(ch);
@@ -51,7 +51,7 @@ static void handle_user_input(char input) {
         if (cmd_len > 0) {
             cmd_len--;
             cmd_buffer[cmd_len] = '\0';
-            uart_put_str("\b \b"); // Erase character on terminal
+            uart_puts("\b \b"); // Erase character on terminal
         }
     } else {
         // Add character to buffer
@@ -74,7 +74,7 @@ static void execute_command(char *cmd) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_STATUS, core_id, 0);
         } else {
-            microkit_dbg_puts("Usage: status <core_id>\n");
+            uart_puts("Usage: status <core_id>\n");
         }
     } else if (str_eq(command, "dump")) {
         char *arg = next_token(&cmd);
@@ -82,7 +82,7 @@ static void execute_command(char *cmd) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_DUMP, core_id, 0);
         } else {
-            microkit_dbg_puts("Usage: dump <core_id>\n");
+            uart_puts("Usage: dump <core_id>\n");
         }
     } else if (str_eq(command, "migrate")) {
         char *pd_arg = next_token(&cmd);
@@ -95,7 +95,7 @@ static void execute_command(char *cmd) {
             uint8_t core_id = str_to_int(core_arg);
             send_core_command(CORE_MIGRATE, core_id, pd_id);
         } else {
-            microkit_dbg_puts("Usage: migrate <pd_id> <core> OR migrate monitor <core>\n");
+            uart_puts("Usage: migrate <pd_id> <core> OR migrate monitor <core>\n");
         }
     } else if (str_eq(command, "off")) {
         char *arg = next_token(&cmd);
@@ -103,7 +103,7 @@ static void execute_command(char *cmd) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_OFF, core_id, 0);
         } else {
-            microkit_dbg_puts("Usage: off <core_id>\n");
+            uart_puts("Usage: off <core_id>\n");
         }
     } else if (str_eq(command, "powerdown")) {
         char *arg = next_token(&cmd);
@@ -111,7 +111,7 @@ static void execute_command(char *cmd) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_POWERDOWN, core_id, 0);
         } else {
-            microkit_dbg_puts("Usage: powerdown <core_id>\n");
+            uart_puts("Usage: powerdown <core_id>\n");
         }
     } else if (str_eq(command, "standby")) {
         char *arg = next_token(&cmd);
@@ -119,7 +119,7 @@ static void execute_command(char *cmd) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_STANDBY, core_id, 0);
         } else {
-            microkit_dbg_puts("Usage: standby <core_id>\n");
+            uart_puts("Usage: standby <core_id>\n");
         }
     } else if (str_eq(command, "on")) {
         char *arg = next_token(&cmd);
@@ -127,10 +127,10 @@ static void execute_command(char *cmd) {
             uint8_t core_id = str_to_int(arg);
             send_core_command(CORE_ON, core_id, 0);
         } else {
-            microkit_dbg_puts("Usage: on <core_id>\n");
+            uart_puts("Usage: on <core_id>\n");
         }
     } else {
-        microkit_dbg_puts("Unknown command. Type 'help' for a list of commands.\n");
+        uart_puts("Unknown command. Type 'help' for a list of commands.\n");
     }
 }
 
@@ -143,12 +143,12 @@ static void send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id) {
     
     seL4_Bool failed = microkit_mr_get(0);
     if (failed) {
-        microkit_dbg_puts("Core Manager API request failed.\n");
+        uart_puts("Core Manager API request failed.\n");
     }
 }
 
 static void print_help(void) {
-    microkit_dbg_puts(
+    uart_puts(
         "\n=== CORE MANAGEMENT COMMANDS ===\n"
         "help                     : Show this help message\n"
         "status <core_id>         : View the status of a core\n"

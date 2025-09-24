@@ -21,7 +21,7 @@ static void uart_init(void) {
     *REG_PTR(uart_base_vaddr, UARTIMSC) = 0x50;
 }
 
-static int uart_get_char(void) {
+static int uart_getchar(void) {
     int ch = 0;
     if ((*REG_PTR(uart_base_vaddr, UARTFR) & PL011_UARTFR_RXFE) == 0) {
         ch = *REG_PTR(uart_base_vaddr, UARTDR) & RHR_MASK;
@@ -37,11 +37,11 @@ static int uart_get_char(void) {
     return ch;
 }
 
-static void uart_put_char(int ch) {
+static void uart_putc(int ch) {
     while ((*REG_PTR(uart_base_vaddr, UARTFR) & PL011_UARTFR_TXFF) != 0);
     *REG_PTR(uart_base_vaddr, UARTDR) = ch;
     if (ch == '\r') {
-        uart_put_char('\n');
+        uart_putc('\n');
     }
 }
 
@@ -49,27 +49,27 @@ static void uart_handle_irq(void) {
     *REG_PTR(uart_base_vaddr, UARTICR) = 0x7f0;
 }
 
-static void uart_put_str(char *str) {
+static void uart_puts(char *str) {
     while (*str) {
-        uart_put_char(*str);
+        uart_putc(*str);
         str++;
     }
 }
 
-static void uart_print_num(uint64_t num) {
+static void uart_put64(uint64_t num) {
     if (num == 0) {
-        uart_put_char('0');
+        uart_putc('0');
         return;
     }
 
     if (num > 9) {
-        uart_print_num(num / 10);
+        uart_put64(num / 10);
     }
-    uart_put_char('0' + (num % 10));
+    uart_putc('0' + (num % 10));
 }
 
-static void uart_print_hex(uint64_t num) {
-    uart_put_str("0x");
+static void uart_puthex64(uint64_t num) {
+    uart_puts("0x");
 
     int started = 0;
     for (int i = 15; i >= 0; i--) {
@@ -77,9 +77,9 @@ static void uart_print_hex(uint64_t num) {
         if (nibble || started || i == 0) {
             started = 1;
             if (nibble < 10) {
-                uart_put_char('0' + nibble);
+                uart_putc('0' + nibble);
             } else {
-                uart_put_char('a' + (nibble - 10));
+                uart_putc('a' + (nibble - 10));
             }
         }
     }

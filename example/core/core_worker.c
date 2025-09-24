@@ -1,4 +1,5 @@
 #include "core.h"
+#include "uart.h"
 
 #define CORE_MANAGER_CHANNEL 1
 
@@ -13,9 +14,9 @@ void init(void) {
 
 void notified(microkit_channel ch) {
     if (ch != CORE_MANAGER_CHANNEL) {
-        microkit_dbg_puts("[Core Worker]: Received unexpected notification: ");
-        microkit_dbg_put32(ch);
-        microkit_dbg_putc('\n');
+        uart_puts("[Core Worker]: Received unexpected notification: ");
+        uart_put64(ch);
+        uart_putc('\n');
         return;
     }
 
@@ -24,18 +25,18 @@ void notified(microkit_channel ch) {
         seL4_DebugDumpScheduler();
         break;
     case CORE_OFF:
-        microkit_dbg_puts("[Core Worker]: Turning off core.\n");
+        uart_puts("[Core Worker]: Turning off core.\n");
         core_off();
         break;
     case CORE_POWERDOWN:
-        microkit_dbg_puts("[Core Worker]: Powering down core.\n");
+        uart_puts("[Core Worker]: Powering down core.\n");
         core_suspend(1);
         break;
     case CORE_STANDBY:
         core_suspend(0);
         break;
     default:
-        microkit_dbg_puts("[Core Worker]: Encountered unexpected instruction.\n");
+        uart_puts("[Core Worker]: Encountered unexpected instruction.\n");
         break;
     }
 }

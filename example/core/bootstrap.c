@@ -42,23 +42,6 @@ static void puts(const char *str) {
     }
 }
 
-static void put_hex64(uint64_t num) {
-    puts("0x");
-
-    int started = 0;
-    for (int i = 15; i >= 0; i--) {
-        uint8_t nibble = (num >> (i * 4)) & 0xF;
-        if (nibble || started || i == 0) {
-            started = 1;
-            if (nibble < 10) {
-                putc('0' + nibble);
-            } else {
-                putc('a' + (nibble - 10));
-            }
-        }
-    }
-}
-
 static inline uint32_t current_el(void) {
     /* See: C5.2.1 CurrentEL */
     uint32_t val;
