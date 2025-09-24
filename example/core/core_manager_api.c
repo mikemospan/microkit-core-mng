@@ -58,7 +58,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     switch (instruction_vaddr[0]) {
     case CORE_ON:
         core_on(core, BOOTSTRAP_ENTRY);
-        microkit_pd_restart(core, PD_INIT_ENTRY);
+        microkit_pd_restart(core + 1, PD_INIT_ENTRY);
         break;
     case CORE_OFF:
     case CORE_POWERDOWN:
