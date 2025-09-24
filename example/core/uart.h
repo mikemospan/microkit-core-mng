@@ -17,7 +17,7 @@ uintptr_t uart_base_vaddr;
 
 #define REG_PTR(base, offset)  ((volatile uint32_t *)((base) + (offset)))
 
-static void uart_init(void) {
+static inline void uart_init(void) {
     *REG_PTR(uart_base_vaddr, UARTIMSC) = 0x50;
 }
 
@@ -45,11 +45,11 @@ static void uart_putc(int ch) {
     }
 }
 
-static void uart_handle_irq(void) {
+static inline void uart_handle_irq(void) {
     *REG_PTR(uart_base_vaddr, UARTICR) = 0x7f0;
 }
 
-static void uart_puts(char *str) {
+static void uart_puts(const char *str) {
     while (*str) {
         uart_putc(*str);
         str++;

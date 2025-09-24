@@ -1,12 +1,15 @@
 #include <stdint.h>
 
 #define STACK_SIZE 4096
+#define ALIGN(n) __attribute__((__aligned__(n)))
 
-#define ALIGN(n)  __attribute__((__aligned__(n)))
+/* Start the kernel entry point */
 #define START_KERNEL() ((sel4_entry)(kernel_entry))(0, 0, 0, 0, 0, 0, 0, 0)
+
 /* Put the CPU into a low-power wait loop when failed */
 #define FAIL() for (;;) { asm volatile("wfi"); }
 
+/* Kernel entry function type */
 typedef void (*sel4_entry)(
     uintptr_t ui_p_reg_start,
     uintptr_t ui_p_reg_end,
@@ -18,41 +21,45 @@ typedef void (*sel4_entry)(
     uintptr_t extra_device_size
 );
 
+/* Enable EL2 MMU */
 void el2_mmu_enable(void);
 
-/* Reference to temporary hardware page table after MMU setup */
+/* Temporary hardware page tables for boot */
 uint64_t boot_lvl0_lower[512] ALIGN(4096);
 uint64_t boot_lvl0_upper[512] ALIGN(4096);
 uint64_t boot_lvl1_lower[512] ALIGN(4096);
 uint64_t boot_lvl1_upper[512] ALIGN(4096);
 uint64_t boot_lvl2_upper[512] ALIGN(4096);
-/* Virtual memory into the kernel initialisation function */
+
+/* Kernel entry point address */
 uintptr_t kernel_entry;
-/* Stack of each CPU core in the system */
+
+/* Stack for each CPU core */
 volatile uint8_t cpu_stacks[NUM_CPUS][STACK_SIZE] ALIGN(16);
 
+/* --- Simple UART output --- */
 static inline void putc(int ch) {
     volatile uint32_t *uart_phys = (volatile uint32_t *)0x9000000;
     *uart_phys = ch;
 }
 
-static void puts(const char *str) {
+static inline void puts(const char *str) {
     while (*str) {
         putc(*str++);
     }
 }
 
+/* Get current exception level */
 static inline uint32_t current_el(void) {
-    /* See: C5.2.1 CurrentEL */
     uint32_t val;
     asm volatile("mrs %x0, CurrentEL" : "=r"(val) :: "cc");
-    /* bottom two bits are res0 */
-    return val >> 2;
+    return val >> 2; // EL encoded in top bits
 }
 
+/* Entry point for secondary CPUs */
 void secondary_cpu_entry(uint64_t cpu_id) {
     asm volatile("dsb sy" ::: "memory");
-    
+
     puts("[Core Manager]: Booting CPU #");
     putc(cpu_id + '0');
     putc('\n');
@@ -62,18 +69,17 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     putc(el + '0');
     putc('\n');
 
-    if (el == 2) {
-        /* seL4 relies on the timer to be set to a useful value */
-        puts("Resetting CNTVOFF\n");
-        asm volatile("msr cntvoff_el2, xzr");
-    } else {
-        puts("We're not in EL2!!\n");
+    if (el != 2) {
+        puts("Error: not in EL2!\n");
         FAIL();
     }
 
-    /* Get this CPU's ID and save it to TPIDR_EL1 for seL4. */
-    /* Whether or not seL4 is booting in EL2 does not matter, as it always looks at tpidr_el1 */
-    asm volatile("msr tpidr_el1" ",%0" :: "r" (cpu_id));
+    /* Reset virtual offset timer for EL2 */
+    puts("Resetting CNTVOFF\n");
+    asm volatile("msr cntvoff_el2, xzr");
+
+    /* Save CPU ID in TPIDR_EL1 for seL4 */
+    asm volatile("msr tpidr_el1, %0" :: "r"(cpu_id));
 
     puts("Enabling the MMU\n");
     el2_mmu_enable();
@@ -81,10 +87,9 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     puts("Starting the seL4 kernel\n");
     START_KERNEL();
 
-    puts("[Core Manager]: Error - KERNEL RETURNED (CPU ");
+    /* Should never return from kernel */
+    puts("[Core Manager]: Error - Kernel returned (CPU ");
     putc(cpu_id + '0');
     puts(")\n");
-
-    /* Note: can't usefully return to U-Boot once we are here. */
     FAIL();
 }

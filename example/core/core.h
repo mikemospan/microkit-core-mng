@@ -1,6 +1,9 @@
 #pragma once
 
 #include <microkit.h>
+#include <stdint.h>
+
+#define MAX_PDS             63
 
 #define PSCI_VERSION_FID    0x84000000
 #define PSCI_CPU_SUSPEND    0x84000001
@@ -32,8 +35,7 @@ typedef enum {
     CORE_STANDBY,
     CORE_MIGRATE,
     CORE_MIGRATE_MONITOR,
-    CORE_STATUS,
-    CORE_DUMP,
+    CORE_STATUS
 } Instruction;
 
 static int print_error(seL4_ARM_SMCContext response) {
@@ -67,4 +69,11 @@ static int print_error(seL4_ARM_SMCContext response) {
     }
 
     return 1;
+}
+
+static void *memcpy(void *dst, const void *src, uint64_t sz) {
+    char *d = dst;
+    const char *s = src;
+    while (sz--) *d++ = *s++;
+    return dst;
 }
