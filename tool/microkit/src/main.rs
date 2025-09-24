@@ -2231,46 +2231,84 @@ fn build_system(
     }
 
     /* --- START: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */
-    // TODO: Consider whether the core manager should always be the first pd?
+    // TODO: Consider whether the core manager should always be named "core_manager_api"?
+    if system.protection_domains[0].name == "core_manager_api" {
+        // Mint access to the Monitor's scheduling context in CSpace of the Core Manager API PD
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::CnodeMint {
+                cnode: cnode_objs[0].cap_addr,
+                dest_index: BASE_SCHED_CONTEXT_CAP + 63,
+                dest_depth: PD_CAP_BITS,
+                src_root: root_cnode_cap,
+                src_obj: INIT_SHED_CONTEXT_CAP_ADDDRESS,
+                src_depth: config.cap_address_bits,
+                rights: Rights::All as u64,
+                badge: 0,
+            },
+        ));
 
-    // Mint access to the Monitor's scheduling context in CSpace of the Core Manager API PD
-    system_invocations.push(Invocation::new(
-        config,
-        InvocationArgs::CnodeMint {
-            cnode: cnode_objs[0].cap_addr,
-            dest_index: BASE_SCHED_CONTEXT_CAP + 63,
-            dest_depth: PD_CAP_BITS,
-            src_root: root_cnode_cap,
-            src_obj: INIT_SHED_CONTEXT_CAP_ADDDRESS,
-            src_depth: config.cap_address_bits,
-            rights: Rights::All as u64,
-            badge: 0,
-        },
-    ));
+        // Mint access to the Core Manager API's scheduling context in CSpace of the Core Manager API PD
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::CnodeMint {
+                cnode: cnode_objs[0].cap_addr,
+                dest_index: BASE_SCHED_CONTEXT_CAP,
+                dest_depth: PD_CAP_BITS,
+                src_root: root_cnode_cap,
+                src_obj: pd_sched_context_objs[0].cap_addr,
+                src_depth: config.cap_address_bits,
+                rights: Rights::All as u64,
+                badge: 0,
+            },
+        ));
 
-    // Mint access to the Core Manager API's scheduling context in CSpace of the Core Manager API PD
-    system_invocations.push(Invocation::new(
-        config,
-        InvocationArgs::CnodeMint {
-            cnode: cnode_objs[0].cap_addr,
-            dest_index: BASE_SCHED_CONTEXT_CAP,
-            dest_depth: PD_CAP_BITS,
-            src_root: root_cnode_cap,
-            src_obj: pd_sched_context_objs[0].cap_addr,
-            src_depth: config.cap_address_bits,
-            rights: Rights::All as u64,
-            badge: 0,
-        },
-    ));
+        // Mint access to the child scheduling context in CSpace of the Core Manager API PD
+        for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
+            // Before doing anything, check if we are dealing with a child PD
+            if let Some(parent_idx) = maybe_child_pd.parent {
+                // We are dealing with a child PD, now check if the index of its parent
+                // matches this iteration's PD.
+                if parent_idx == 0 {
+                    let cap_idx = BASE_SCHED_CONTEXT_CAP + maybe_child_pd.id.unwrap();
+                    assert!(cap_idx < PD_CAP_SIZE);
+                    system_invocations.push(Invocation::new(
+                        config,
+                        InvocationArgs::CnodeMint {
+                            cnode: cnode_objs[0].cap_addr,
+                            dest_index: cap_idx,
+                            dest_depth: PD_CAP_BITS,
+                            src_root: root_cnode_cap,
+                            src_obj: pd_sched_context_objs[maybe_child_idx].cap_addr,
+                            src_depth: config.cap_address_bits,
+                            rights: Rights::All as u64,
+                            badge: 0,
+                        },
+                    ));
+                }
+            }
+        }
 
-    // Mint access to the child scheduling context in CSpace of the Core Manager API PD
-    for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
-        // Before doing anything, check if we are dealing with a child PD
-        if let Some(parent_idx) = maybe_child_pd.parent {
-            // We are dealing with a child PD, now check if the index of its parent
-            // matches this iteration's PD.
-            if parent_idx == 0 {
-                let cap_idx = BASE_SCHED_CONTEXT_CAP + maybe_child_pd.id.unwrap();
+        // Grant every sched control cap to the Core Manager API via cnode copy
+        for cpu_id in 0..config.cores {
+            system_invocations.push(Invocation::new(
+                config,
+                InvocationArgs::CnodeCopy {
+                    cnode: cnode_objs[0].cap_addr,
+                    dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
+                    dest_depth: PD_CAP_BITS,
+                    src_root: root_cnode_cap,
+                    src_obj: kernel_boot_info.sched_control_cap + cpu_id,
+                    src_depth: config.cap_address_bits,
+                    rights: Rights::All as u64,
+                },
+            ));
+        }
+
+        // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
+        for (_, pd) in system.protection_domains.iter().enumerate() {
+            for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
+                let cap_idx = BASE_IRQ_CAP + sysirq.id;
                 assert!(cap_idx < PD_CAP_SIZE);
                 system_invocations.push(Invocation::new(
                     config,
@@ -2279,7 +2317,7 @@ fn build_system(
                         dest_index: cap_idx,
                         dest_depth: PD_CAP_BITS,
                         src_root: root_cnode_cap,
-                        src_obj: pd_sched_context_objs[maybe_child_idx].cap_addr,
+                        src_obj: *irq_cap_address,
                         src_depth: config.cap_address_bits,
                         rights: Rights::All as u64,
                         badge: 0,
@@ -2287,60 +2325,23 @@ fn build_system(
                 ));
             }
         }
-    }
 
-    // Grant every sched control cap to the Core Manager API via cnode copy
-    for cpu_id in 0..config.cores {
-        system_invocations.push(Invocation::new(
-            config,
-            InvocationArgs::CnodeCopy {
-                cnode: cnode_objs[0].cap_addr,
-                dest_index: BASE_SCHED_CONTROL_CAP + cpu_id,
-                dest_depth: PD_CAP_BITS,
-                src_root: root_cnode_cap,
-                src_obj: kernel_boot_info.sched_control_cap + cpu_id,
-                src_depth: config.cap_address_bits,
-                rights: Rights::All as u64,
-            },
-        ));
-    }
-
-    // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
-    for (_, pd) in system.protection_domains.iter().enumerate() {
-        for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
-            let cap_idx = BASE_IRQ_CAP + sysirq.id;
-            assert!(cap_idx < PD_CAP_SIZE);
-            system_invocations.push(Invocation::new(
-                config,
-                InvocationArgs::CnodeMint {
-                    cnode: cnode_objs[0].cap_addr,
-                    dest_index: cap_idx,
-                    dest_depth: PD_CAP_BITS,
-                    src_root: root_cnode_cap,
-                    src_obj: *irq_cap_address,
-                    src_depth: config.cap_address_bits,
-                    rights: Rights::All as u64,
-                    badge: 0,
-                },
-            ));
+        // Flatten irq bitmasks into bytes in C row-major order
+        let mut pd_irqs_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+        let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+        let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+        for pd in &system.protection_domains {
+            pd_irqs_bytes.extend_from_slice(&pd.irq_bits().to_le_bytes());
+            pd_budget_bytes.extend_from_slice(&pd.budget.to_le_bytes());
+            pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
         }
-    }
 
-    // Flatten irq bitmasks into bytes in C row-major order
-    let mut pd_irqs_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
-    let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
-    let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
-    for pd in &system.protection_domains {
-        pd_irqs_bytes.extend_from_slice(&pd.irq_bits().to_le_bytes());
-        pd_budget_bytes.extend_from_slice(&pd.budget.to_le_bytes());
-        pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
+        // Write into the first ELF (core manager ELF)
+        let elf = &mut pd_elf_files[0];
+        elf.write_symbol("pd_irqs", &pd_irqs_bytes)?;
+        elf.write_symbol("pd_budget", &pd_budget_bytes)?;
+        elf.write_symbol("pd_period", &pd_period_bytes)?;
     }
-
-    // Write into the first ELF (core manager ELF)
-    let elf = &mut pd_elf_files[0];
-    elf.write_symbol("pd_irqs", &pd_irqs_bytes)?;
-    elf.write_symbol("pd_budget", &pd_budget_bytes)?;
-    elf.write_symbol("pd_period", &pd_period_bytes)?;
 
     /* --- END: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */
 
@@ -3686,9 +3687,11 @@ fn main() -> Result<(), String> {
     }
     report_buf.flush().unwrap();
 
-    let core_manager_elf = &mut pd_elf_files[0];
-    let mut core_manager = CoreManager::new(&kernel_elf, core_manager_elf);
-    core_manager.patch_elf().expect("Failed to patch core manager api elf");
+    if system.protection_domains[0].name == "core_manager_api" {
+        let core_manager_elf = &mut pd_elf_files[0];
+        let mut core_manager = CoreManager::new(&kernel_elf, core_manager_elf);
+        core_manager.patch_elf().expect("Failed to patch core manager api elf");
+    }
 
     let mut loader_regions: Vec<(u64, &[u8])> = vec![(
         built_system.reserved_region.base,

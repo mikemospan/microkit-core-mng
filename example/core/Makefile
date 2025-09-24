@@ -77,7 +77,7 @@ clean:
 	rm -f $(BUILD_DIR)/*.o $(BUILD_DIR)/*.elf $(IMAGE_FILE) $(REPORT_FILE)
 
 qemu: $(IMAGE_FILE)
-	if ! command -v $(QEMU) > /dev/null 2>&1; then echo "Could not find dependency: qemu-system-aarch64"; exit 1; fi
+	@if ! command -v $(QEMU) > /dev/null 2>&1; then echo "Could not find dependency: qemu-system-aarch64"; exit 1; fi
 	$(QEMU) -machine virt,virtualization=on,highmem=off,secure=off,gic-version=2 \
 		-cpu $(CPU) \
 		-serial mon:stdio \
@@ -89,7 +89,7 @@ qemu: $(IMAGE_FILE)
 		-D qemu_debug.log
 
 qemu-debug: $(IMAGE_FILE)
-	if ! command -v $(QEMU) > /dev/null 2>&1; then echo "Could not find dependency: qemu-system-aarch64"; exit 1; fi
+	@if ! command -v $(QEMU) > /dev/null 2>&1; then echo "Could not find dependency: qemu-system-aarch64"; exit 1; fi
 	$(QEMU) -machine virt,virtualization=on,highmem=off,secure=off,gic-version=2 \
 		-cpu $(CPU) \
 		-serial mon:stdio \
