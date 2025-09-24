@@ -39,11 +39,6 @@ void init(void) {
     uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
     memcpy(bootstrap_vaddr, bootstrap_start, bootstrap_size);
     asm volatile("dsb sy" ::: "memory");
-
-    /* Migrate all worker PDs to relevant cores */
-    core_migrate(2, 1);
-    core_migrate(3, 2);
-    core_migrate(4, 3);
 }
 
 void notified(microkit_channel ch) {

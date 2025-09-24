@@ -25,14 +25,14 @@ static void handle_user_input(char input);
 static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id);
 static void dump_core(uint8_t core);
 static void print_help(void);
-static void migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id);
+static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id);
 
 void init(void) {
     uart_init();
     cmd_buffer[0] = '\0';
     cmd_len = 0;
 
-    // Worker PDs were migrated in core_manager_api init
+    /* Migrate all worker PDs to relevant cores */
     migrate_pd(0, 1, 2);
     migrate_pd(0, 2, 3);
     migrate_pd(0, 3, 4);
@@ -112,12 +112,11 @@ static void execute_command(char *cmd) {
         } else if (pd_arg && core_arg) {
             uint8_t pd_id = str_to_int(pd_arg);
             uint8_t core_id = str_to_int(core_arg);
-            err = send_core_command(CORE_MIGRATE, core_id, pd_id);
             if (!err) {
                 // Update local state
                 for (int c = 0; c < NUM_CPUS; c++) {
                     if (core_pds[c][pd_id][0] != '\0') {
-                        migrate_pd(c, core_id, pd_id);
+                        err = migrate_pd(c, core_id, pd_id);
                         break;
                     }
                 }
@@ -284,7 +283,8 @@ static void *memcpy(void *dst, const void *src, uint64_t sz) {
     return dst;
 }
 
-static void migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id) {
+static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id) {
     memcpy(core_pds[to_core][pd_id], core_pds[from_core][pd_id], MICROKIT_PD_NAME_LENGTH);
     core_pds[from_core][pd_id][0] = '\0'; // mark old slot empty
+    return send_core_command(CORE_MIGRATE, to_core, pd_id);
 }
