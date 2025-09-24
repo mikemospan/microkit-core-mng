@@ -4,7 +4,7 @@
 BUILD_DIR="./build"
 MICROKIT_BOARD="qemu_virt_aarch64"
 MICROKIT_SDK="../../release/microkit-sdk-2.0.1-dev"
-MICROKIT_CONFIG="debug"
+MICROKIT_CONFIG="benchmark"
 NUM_CPUS=4
 
 # Ensure the script is run from the correct directory

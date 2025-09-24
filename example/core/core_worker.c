@@ -22,7 +22,7 @@ void notified(microkit_channel ch) {
 
     switch (instruction_vaddr[0]) {
     case CORE_DUMP:
-        seL4_DebugDumpScheduler();
+        // seL4_DebugDumpScheduler();
         break;
     case CORE_OFF:
         uart_puts("[Core Worker]: Turning off core.\n");

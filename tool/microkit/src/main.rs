@@ -2327,17 +2327,32 @@ fn build_system(
         }
 
         // Flatten irq bitmasks into bytes in C row-major order
+        let mut core_pds_bytes = vec![0u8; config.cores as usize * MAX_PDS * PD_MAX_NAME_LENGTH];
         let mut pd_irqs_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
         let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
         let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
-        for pd in &system.protection_domains {
+        for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+            let offset = pd_idx * PD_MAX_NAME_LENGTH; // All pds start on core 0
+            let slot = &mut core_pds_bytes[offset .. offset + PD_MAX_NAME_LENGTH];
+
+            // Copy PD name as bytes
+            let name_bytes = pd.name.as_bytes();
+            // Leave room for null terminator
+            let len = name_bytes.len().min(PD_MAX_NAME_LENGTH - 1);
+            slot[..len].copy_from_slice(&name_bytes[..len]);
+            // Explicit null terminator
+            slot[len] = 0;
+
             pd_irqs_bytes.extend_from_slice(&pd.irq_bits().to_le_bytes());
             pd_budget_bytes.extend_from_slice(&pd.budget.to_le_bytes());
             pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
         }
 
         // Write into the first ELF (core manager ELF)
-        let elf = &mut pd_elf_files[0];
+        let (first, rest) = pd_elf_files.split_at_mut(1);
+        let elf = &mut first[0];
+        let core_manager = &mut rest[4]; // index 4 overall
+        core_manager.write_symbol("core_pds", &core_pds_bytes)?;
         elf.write_symbol("pd_irqs", &pd_irqs_bytes)?;
         elf.write_symbol("pd_budget", &pd_budget_bytes)?;
         elf.write_symbol("pd_period", &pd_period_bytes)?;
