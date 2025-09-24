@@ -35,11 +35,6 @@ void init(void) {
     uart_init();
     cmd_buffer[0] = '\0';
     cmd_len = 0;
-
-    // Migrate initial worker PDs to respective cores
-    migrate_pd(0, 1, 2);
-    migrate_pd(0, 2, 3);
-    migrate_pd(0, 3, 4);
 }
 
 void notified(microkit_channel ch) {

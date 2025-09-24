@@ -2332,7 +2332,7 @@ fn build_system(
         let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
         let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
         for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
-            let offset = pd_idx * PD_MAX_NAME_LENGTH; // All pds start on core 0
+            let offset = (pd.cpu as usize * MAX_PDS * PD_MAX_NAME_LENGTH) + pd_idx * PD_MAX_NAME_LENGTH;
             let slot = &mut core_pds_bytes[offset .. offset + PD_MAX_NAME_LENGTH];
 
             // Copy PD name as bytes
