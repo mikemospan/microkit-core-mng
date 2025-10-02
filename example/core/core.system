@@ -39,6 +39,7 @@
             <program_image path="core_manager.elf"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <map mr="uart_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="cmd_buffer"/>
+            <irq irq="225" id="2" trigger="edge"/>
         </protection_domain>
     </protection_domain>
 

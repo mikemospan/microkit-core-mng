@@ -39,7 +39,7 @@ volatile uint8_t cpu_stacks[NUM_CPUS][STACK_SIZE] ALIGN(16);
 
 /* --- Simple UART output --- */
 static inline void putc(int ch) {
-    volatile uint32_t *uart_phys = (volatile uint32_t *)0x9000000;
+    volatile uint32_t *uart_phys = (volatile uint32_t *)0xff803000;
     *uart_phys = ch;
 }
 

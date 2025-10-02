@@ -193,9 +193,8 @@ BEGIN_FUNC(bootstrap_start)
     add  x1, x1, #STACK_SIZE       // x1 = top of stack for this CPU
     mov  sp, x1
 
-
     bl secondary_cpu_entry
-   
+
 END_FUNC(bootstrap_start)
 
 /* Invalidate the I-cache */
