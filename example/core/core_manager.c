@@ -2,7 +2,7 @@
 #include "uart.h"
 
 #define API_CHANNEL 1
-#define BACKSPACE   127
+#define DELETE     127
 
 // Each entry corresponds to a core and the PDs it is running
 char core_pds[NUM_CPUS][MAX_PDS][MICROKIT_PD_NAME_LENGTH];
@@ -32,9 +32,9 @@ static void print_help(void);
 
 // === Microkit API functions ===
 void init(void) {
-    uart_init();
-    cmd_buffer[0] = '\0';
-    cmd_len = 0;
+    while(1) {
+        uart_putc(uart_getc());
+    }
 }
 
 void notified(microkit_channel ch) {
@@ -45,8 +45,7 @@ void notified(microkit_channel ch) {
         return;
     }
 
-    char input = uart_getchar();
-    uart_handle_irq();
+    char input = uart_getc();
     uart_putc(input);
 
     handle_user_input(input);
@@ -59,7 +58,7 @@ static void handle_user_input(char input) {
         execute_command(cmd_buffer);
         cmd_len = 0;
         cmd_buffer[0] = '\0';
-    } else if (input == BACKSPACE) {
+    } else if (input == DELETE) {
         if (cmd_len > 0) {
             cmd_len--;
             cmd_buffer[cmd_len] = '\0';

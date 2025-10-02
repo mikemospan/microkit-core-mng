@@ -32,13 +32,13 @@ double core_utils[NUM_CPUS];
 
 // === Microkit API functions ===
 void init(void) {
-    halt_pmu();
-    init_pmu_regs();
+    // halt_pmu();
+    // init_pmu_regs();
 
-    configure_clkcnt(CYCLE_COUNTER_PERIOD, 1);
+    // configure_clkcnt(CYCLE_COUNTER_PERIOD, 1);
 
-    reset_pmu();
-    resume_pmu();
+    // reset_pmu();
+    // resume_pmu();
 }
 
 void notified(microkit_channel ch) {

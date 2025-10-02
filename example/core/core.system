@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <system>
-    <memory_region name="uart" size="0x1_000" phys_addr="0x9_000_000"/>
+    <memory_region name="uart" size="0x1_000" phys_addr="0xff_803_000"/>
     <memory_region name="uart_buffer" size="0x1_000"/>
     <memory_region name="worker_buffer" size="0x1_000"/>
     <memory_region name="bootstrap_mem" size="0x10_000" phys_addr="0x80_000_000"/>
@@ -39,7 +39,6 @@
             <program_image path="core_manager.elf"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <map mr="uart_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="cmd_buffer"/>
-            <irq irq="33" id="2"/> <!-- UART interrupt -->
         </protection_domain>
     </protection_domain>
 

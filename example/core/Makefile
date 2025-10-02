@@ -3,7 +3,7 @@
 
 # Variables
 TOOLCHAIN := aarch64-none-elf
-CPU := cortex-a53
+CPU := cortex-a55
 CC := $(TOOLCHAIN)-gcc
 LD := $(TOOLCHAIN)-ld
 AS := $(TOOLCHAIN)-as

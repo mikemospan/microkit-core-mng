@@ -229,6 +229,7 @@ SUPPORTED_BOARDS = (
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
             "KernelMaxNumNodes": "4",
+            "KernelAllowSMCCalls": True,
         },
     ),
     BoardInfo(
