@@ -9,6 +9,7 @@ uintptr_t uart_base_vaddr;
 #define UART_REG(offset)        (*(volatile uint32_t *)(uart_base_vaddr + (offset)))
 #define BIT(nr)                 (1UL << (nr))
 
+#ifdef CONFIG_PLAT_ODROIDC4
 #define UART_WFIFO              0x00
 #define UART_RFIFO              0x04
 #define UART_CTRL               0x08
@@ -89,6 +90,42 @@ static void uart_putc(char ch) {
         UART_REG(UART_WFIFO) = '\n';
     }
 }
+#elif defined(CONFIG_PLAT_MAAXBOARD)
+#define STAT 0x98
+#define TRANSMIT 0x40
+#define STAT_TDRE (1 << 14)
+
+#define UART_TS                 0xb4
+#define UART_TST_RX_FIFO_EMPTY      BIT(5)          /* Rx FIFO is empty. */
+#define UART_RXD    0x0
+
+static void uart_init(void) {
+    
+}
+
+static void uart_putc(char ch) {
+    // Handle cursor: ensure both LF and CR are sent
+    if (ch == '\n') {
+        uart_putc('\r');
+    }
+
+    while (!(UART_REG(STAT) & STAT_TDRE)) { }
+    UART_REG(TRANSMIT) = ch;
+}
+
+static char uart_getc(void) {
+    char c = '\0';
+    // Wait until UART can accept a new character
+    while (!(UART_REG(UART_TS) & UART_TST_RX_FIFO_EMPTY)) {
+        c = UART_REG(UART_RXD);
+    }
+    
+    if (c == 8) {
+        c = 127; // Map backspace to delete
+    }
+    return c;
+}
+#endif
 
 static void uart_puts(const char *str) {
     for (; *str != '\0'; str++) {

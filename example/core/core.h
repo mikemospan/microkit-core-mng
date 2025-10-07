@@ -53,7 +53,7 @@ static int print_error(seL4_ARM_SMCContext response) {
         microkit_dbg_puts("The core you are trying to turn on, is already on.\n");
         break;
     case PSCI_E_ON_PENDING:
-        microkit_dbg_puts("A previous instruction is still being completed on this core.\n");
+        microkit_dbg_puts("The core you are trying to turn on is already mid turning on.\n");
         break;
     case PSCI_E_INTERNAL_FAILURE:
         microkit_dbg_puts("This specific core cannot be operated on due to physical reasons.\n");

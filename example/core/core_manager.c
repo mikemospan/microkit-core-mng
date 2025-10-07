@@ -35,6 +35,15 @@ void init(void) {
     cmd_buffer[0] = '\0';
     cmd_len = 0;
     uart_init();
+    uart_puts("Test\n");
+
+    while (1) {
+        char input = uart_getc();
+        if (input != 0) {
+            uart_putc(input);
+            handle_user_input(input);
+        }
+    }
 }
 
 void notified(microkit_channel ch) {
@@ -44,6 +53,8 @@ void notified(microkit_channel ch) {
         uart_putc('\n');
         return;
     }
+
+    microkit_dbg_puts("got irq\n");
 
     char input = uart_getc();
     uart_putc(input);

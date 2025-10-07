@@ -135,6 +135,7 @@ SUPPORTED_BOARDS = (
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
             "KernelMaxNumNodes": "4",
+            "KernelAllowSMCCalls": True,
         },
     ),
     BoardInfo(
@@ -214,7 +215,6 @@ SUPPORTED_BOARDS = (
             "KernelArmExportPCNTUser": True,
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
-            "KernelMaxNumNodes": "4",
         },
     ),
     BoardInfo(
@@ -243,7 +243,6 @@ SUPPORTED_BOARDS = (
             "KernelArmExportPCNTUser": True,
             "QEMU_MEMORY": "2048",
             "KernelArmHypervisorSupport": True,
-            "KernelArmExportPCNTUser": True,
             "KernelArmExportPTMRUser": True,
             "KernelArmVtimerUpdateVOffset": False,
             "KernelMaxNumNodes": "4",

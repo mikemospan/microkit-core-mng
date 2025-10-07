@@ -3,12 +3,13 @@
 
 // === Constants ===
 #define PD_INIT_ENTRY           0x200000
-#define BOOTSTRAP_ENTRY         0x80000000
 
 #define BASE_SCHED_CONTEXT_CAP  394
 #define BASE_SCHED_CONTROL_CAP  458
 
 #define MAX_IRQS                64
+
+uintptr_t bootstrap_entry;
 
 // === External symbols ===
 extern char bootstrap_start[];
@@ -28,18 +29,71 @@ uint8_t monitor_core = 0;
 // Number of cores currently on
 uint8_t cores_on = NUM_CPUS;
 
+char *test_vaddr;
+
 // === Core operation prototypes ===
 static inline void core_migrate(uint8_t pd, uint8_t core);
 static inline void monitor_migrate(uint8_t core);
 static void core_on(uint8_t core, seL4_Word cpu_bootstrap);
 static seL4_Word core_status(uint8_t core, seL4_Bool print);
 
+void dump_bootstrap(uintptr_t addr, uint64_t size) {
+    uint8_t *p = (uint8_t *)addr;
+
+    for (uint64_t i = 0; i < size; i++) {
+        if (i % 16 == 0) {
+            // New line + address
+            uart_puts("\n");
+            uart_puthex64(addr + i);
+            uart_puts(": ");
+        }
+
+        // Print each byte as two hex digits
+        uint8_t b = p[i];
+        const char *hex = "0123456789ABCDEF";
+        uart_putc(hex[b >> 4]);
+        uart_putc(hex[b & 0xF]);
+        uart_putc(' ');
+    }
+    uart_putc('\n');
+}
+
 // === Microkit API functions ===
 void init(void) {
     // Copy the entire bootstrap section to the bootstrap memory region.
     uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
     memcpy(bootstrap_vaddr, bootstrap_start, bootstrap_size);
-    asm volatile("dsb sy" ::: "memory");
+
+    uintptr_t start = (uintptr_t)bootstrap_vaddr;
+    // uintptr_t end   = start + bootstrap_size;
+
+    // Clean data cache to PoU (so instruction fetches will see the new code).
+    // for (uintptr_t line = start; line < end; line += 64) {
+    //     asm volatile("dc cvau, %0" :: "r"(line) : "memory");
+    // }
+    // asm volatile("dsb ish");
+
+    for (int i = 0; i < 10; i++) {
+        seL4_ARM_VSpace_CleanInvalidate_Data(3, start, start + 0x1000 - 1);
+        seL4_ARM_VSpace_Unify_Instruction(3, start, start + 0x1000 - 1);
+        start = start + (i + 1) * 0x1000;
+    }
+    
+
+    // Invalidate instruction cache so CPU fetches the new code from memory.
+    // for (uintptr_t line = start; line < end; line += 64) {
+    //     asm volatile("ic ivau, %0" :: "r"(line) : "memory");
+    // }
+    // asm volatile("dsb ish");
+    // asm volatile("isb");
+
+    *test_vaddr = 'X';
+
+    // dump_bootstrap((uintptr_t)bootstrap_vaddr, bootstrap_size);
+
+    // typedef void (*bootstrap_fn)(void);
+    // bootstrap_fn fn = (bootstrap_fn)bootstrap_vaddr;
+    // fn();   // start executing at bootstrap_vaddr
 }
 
 void notified(microkit_channel ch) {
@@ -53,10 +107,14 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     uint8_t pd = microkit_mr_get(2);
     int err = 0;
 
+    uart_puts("Magic char value: ");
+    uart_puthex64(*test_vaddr);
+    uart_putc('\n');
+
     switch (instruction_vaddr[0]) {
         case CORE_ON:
-            core_on(core, BOOTSTRAP_ENTRY);
-            microkit_pd_restart(core + 1, PD_INIT_ENTRY);
+            core_on(core, bootstrap_entry);
+            // microkit_pd_restart(core + 1, PD_INIT_ENTRY);
             break;
         case CORE_OFF:
         case CORE_POWERDOWN:
@@ -114,7 +172,9 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
         default:                            uart_puts("unknown fault"); break;
     }
 
-    uart_puts(" fault from child PD.\n");
+    uart_puts(" fault from child PD: ");
+    uart_put64(child);
+    uart_puts(".\n");
     return seL4_False; // don't reply to fault
 }
 

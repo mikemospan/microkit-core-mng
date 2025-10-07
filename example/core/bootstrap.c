@@ -5,7 +5,6 @@
 
 /* Start the kernel entry point */
 #define START_KERNEL() ((sel4_entry)(kernel_entry))(0, 0, 0, 0, 0, 0, 0, 0)
-
 /* Put the CPU into a low-power wait loop when failed */
 #define FAIL() for (;;) { asm volatile("wfi"); }
 
@@ -21,8 +20,6 @@ typedef void (*sel4_entry)(
     uintptr_t extra_device_size
 );
 
-/* Enable EL2 MMU */
-void el2_mmu_enable(void);
 
 /* Temporary hardware page tables for boot */
 uint64_t boot_lvl0_lower[512] ALIGN(4096);
@@ -80,9 +77,6 @@ void secondary_cpu_entry(uint64_t cpu_id) {
 
     /* Save CPU ID in TPIDR_EL1 for seL4 */
     asm volatile("msr tpidr_el1, %0" :: "r"(cpu_id));
-
-    puts("Enabling the MMU\n");
-    el2_mmu_enable();
 
     puts("Starting the seL4 kernel\n");
     START_KERNEL();
