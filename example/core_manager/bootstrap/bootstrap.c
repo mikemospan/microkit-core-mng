@@ -30,13 +30,14 @@ uint64_t boot_lvl2_upper[512] ALIGN(4096);
 
 /* Kernel entry point address */
 uintptr_t kernel_entry;
+/* Physical entry point for UART. */
+uint32_t *uart_phys;
 
 /* Stack for each CPU core */
 volatile uint8_t cpu_stacks[NUM_CPUS][STACK_SIZE] ALIGN(16);
 
 /* --- Simple UART output --- */
 static inline void putc(int ch) {
-    volatile uint32_t *uart_phys = (volatile uint32_t *)0xff803000;
     *uart_phys = ch;
 }
 

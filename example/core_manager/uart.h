@@ -130,7 +130,7 @@ static char uart_getc(void) {
 #define PL011_UARTFR_RXFE      (1 << 4)
 
 static void uart_init(void) {
-    
+    UART_REG(UARTIMSC) = 0x50;
 }
 
 static void uart_putc(char ch) {

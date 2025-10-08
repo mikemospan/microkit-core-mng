@@ -38,6 +38,9 @@ typedef enum {
     CORE_STATUS
 } Instruction;
 
+/* Physical entry point for bootstrapping code. */
+uintptr_t bootstrap_entry;
+
 static int print_error(seL4_ARM_SMCContext response) {
     switch (response.x0) {
     case PSCI_E_NOT_SUPPORTED:

@@ -54,7 +54,7 @@ static void core_off(void) {
 // Suspend the core (standby or power down) via PSCI call
 static void core_suspend(seL4_Bool power_down) {
     // x1 encodes the power state: bit 16 = power down flag
-    seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_SUSPEND, .x1 = (power_down << 16), .x2 = 0x80000000};
+    seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_SUSPEND, .x1 = (power_down << 16), .x2 = bootstrap_entry};
     seL4_ARM_SMCContext response = {0};
 
     microkit_arm_smc_call(&args, &response);

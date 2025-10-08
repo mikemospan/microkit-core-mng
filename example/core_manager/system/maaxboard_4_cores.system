@@ -11,6 +11,7 @@
         <map mr="bootstrap_mem" vaddr="0x5000000" perms="rwx" setvar_vaddr="bootstrap_vaddr"/>
         <map mr="worker_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="instruction_vaddr"/>
         <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
+        <setvar symbol="uart_phys" region_paddr="uart"/>
 
         <protection_domain name="core_worker0" priority="253" cpu="0" smc="true" id="1">
             <program_image path="core_worker.elf"/>

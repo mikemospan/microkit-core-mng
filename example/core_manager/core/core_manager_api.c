@@ -12,7 +12,6 @@
 // === External symbols ===
 extern char bootstrap_start[];
 extern char bootstrap_end[];
-uintptr_t bootstrap_entry;
 
 // === Globals ===
 void *bootstrap_vaddr;
