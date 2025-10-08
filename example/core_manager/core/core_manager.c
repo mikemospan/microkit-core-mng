@@ -2,26 +2,39 @@
 #include "uart.h"
 
 #define API_CHANNEL 1
-#define BACKSPACE 127
+#define DELETE      127
+
+// Each entry corresponds to a core and the PDs it is running
+char core_pds[NUM_CPUS][MAX_PDS][MICROKIT_PD_NAME_LENGTH];
 
 // Command buffer for user input
 char *cmd_buffer;
 int cmd_len = 0;
 
-// Function prototypes
+// The core the initial task (Monitor) is currently on
+uint8_t monitor_core = 0;
+
+// === Helper function prototypes ===
 static int str_eq(const char *a, const char *b);
 static char *skip_ws(char *p);
 static char *next_token(char **p);
 static int str_to_int(const char *s);
-static void execute_command(char *cmd);
+
+// === Core management prototypes ===
+static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id);
+static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id);
+static void dump_core(uint8_t core);
+
+// === Command handling prototypes ===
 static void handle_user_input(char input);
-static void send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id);
+static void execute_command(char *cmd);
 static void print_help(void);
 
+// === Microkit API functions ===
 void init(void) {
-    uart_init();
     cmd_buffer[0] = '\0';
     cmd_len = 0;
+    uart_init();
 }
 
 void notified(microkit_channel ch) {
@@ -32,121 +45,161 @@ void notified(microkit_channel ch) {
         return;
     }
 
-    char input = uart_getchar();
-    uart_handle_irq();
+    char input = uart_getc();
     uart_putc(input);
-    
     handle_user_input(input);
+
     microkit_irq_ack(ch);
 }
 
+// === Command input handling ===
 static void handle_user_input(char input) {
     if (input == '\r' || input == '\n') {
-        // Execute command on enter
         execute_command(cmd_buffer);
         cmd_len = 0;
         cmd_buffer[0] = '\0';
-    }  else if (input == BACKSPACE) {
-        // Handle backspace
+    } else if (input == DELETE) {
         if (cmd_len > 0) {
             cmd_len--;
             cmd_buffer[cmd_len] = '\0';
-            uart_puts("\b \b"); // Erase character on terminal
+            uart_puts("\b \b");
         }
     } else {
-        // Add character to buffer
         cmd_buffer[cmd_len++] = input;
         cmd_buffer[cmd_len] = '\0';
     }
 }
 
+// === Command execution ===
 static void execute_command(char *cmd) {
     char *command = next_token(&cmd);
     if (!command) {
         return;
     }
 
+    seL4_Bool err = 0;
+
     if (str_eq(command, "help")) {
         print_help();
     } else if (str_eq(command, "status")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            uint8_t core_id = str_to_int(arg);
-            send_core_command(CORE_STATUS, core_id, 0);
+            err = send_core_command(CORE_STATUS, str_to_int(arg), 0);
         } else {
             uart_puts("Usage: status <core_id>\n");
         }
     } else if (str_eq(command, "dump")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            uint8_t core_id = str_to_int(arg);
-            send_core_command(CORE_DUMP, core_id, 0);
+            dump_core(str_to_int(arg));
         } else {
             uart_puts("Usage: dump <core_id>\n");
         }
     } else if (str_eq(command, "migrate")) {
         char *pd_arg = next_token(&cmd);
         char *core_arg = next_token(&cmd);
+
         if (pd_arg && str_eq(pd_arg, "monitor") && core_arg) {
             uint8_t core_id = str_to_int(core_arg);
-            send_core_command(CORE_MIGRATE_MONITOR, core_id, 0);
+            err = send_core_command(CORE_MIGRATE_MONITOR, core_id, 0);
+            if (!err) {
+                monitor_core = core_id;
+            }
         } else if (pd_arg && core_arg) {
             uint8_t pd_id = str_to_int(pd_arg);
             uint8_t core_id = str_to_int(core_arg);
-            send_core_command(CORE_MIGRATE, core_id, pd_id);
+
+            for (int c = 0; c < NUM_CPUS; c++) {
+                if (core_pds[c][pd_id][0] != '\0') {
+                    err = migrate_pd(c, core_id, pd_id);
+                    break;
+                }
+            }
         } else {
             uart_puts("Usage: migrate <pd_id> <core> OR migrate monitor <core>\n");
         }
     } else if (str_eq(command, "off")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            uint8_t core_id = str_to_int(arg);
-            send_core_command(CORE_OFF, core_id, 0);
+            err = send_core_command(CORE_OFF, str_to_int(arg), 0);
         } else {
             uart_puts("Usage: off <core_id>\n");
         }
     } else if (str_eq(command, "powerdown")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            uint8_t core_id = str_to_int(arg);
-            send_core_command(CORE_POWERDOWN, core_id, 0);
+            err = send_core_command(CORE_POWERDOWN, str_to_int(arg), 0);
         } else {
             uart_puts("Usage: powerdown <core_id>\n");
         }
     } else if (str_eq(command, "standby")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            uint8_t core_id = str_to_int(arg);
-            send_core_command(CORE_STANDBY, core_id, 0);
+            err = send_core_command(CORE_STANDBY, str_to_int(arg), 0);
         } else {
             uart_puts("Usage: standby <core_id>\n");
         }
     } else if (str_eq(command, "on")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            uint8_t core_id = str_to_int(arg);
-            send_core_command(CORE_ON, core_id, 0);
+            err = send_core_command(CORE_ON, str_to_int(arg), 0);
         } else {
             uart_puts("Usage: on <core_id>\n");
         }
     } else {
         uart_puts("Unknown command. Type 'help' for a list of commands.\n");
     }
+
+    if (err) {
+        uart_puts("Core Manager API request failed.\n");
+    }
 }
 
-static void send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id) {
+// === Core command interface ===
+static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id) {
     microkit_mr_set(0, cmd);
     microkit_mr_set(1, core_id);
     microkit_mr_set(2, pd_id);
 
     microkit_ppcall(API_CHANNEL, microkit_msginfo_new(0, 3));
-    
-    seL4_Bool failed = microkit_mr_get(0);
-    if (failed) {
-        uart_puts("Core Manager API request failed.\n");
-    }
+    return microkit_mr_get(0);
 }
 
+static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id) {
+    memcpy(core_pds[to_core][pd_id], core_pds[from_core][pd_id], MICROKIT_PD_NAME_LENGTH);
+    core_pds[from_core][pd_id][0] = '\0';
+    return send_core_command(CORE_MIGRATE, to_core, pd_id);
+}
+
+// === Dump helper ===
+static void dump_core(uint8_t core) {
+    if (core >= NUM_CPUS) {
+        uart_puts("Invalid core ID.\n");
+        return;
+    }
+
+    uart_puts("=== Dumping Protection Domains for Core ");
+    uart_put64(core);
+    uart_puts(" ===\nPD ID\tName\n----------------------\n");
+
+    if (core == monitor_core) {
+        uart_puts("\tMicrokit Monitor\n");
+    }
+
+    for (int pd_id = 0; pd_id < MAX_PDS; pd_id++) {
+        char *name = core_pds[core][pd_id];
+        if (name[0] != '\0') {
+            uart_put64(pd_id);
+            uart_puts("\t");
+            uart_puts(name);
+            uart_putc('\n');
+        }
+    }
+
+    uart_puts("=== End Dump ===\n");
+}
+
+// === Command help ===
 static void print_help(void) {
     uart_puts(
         "\n=== CORE MANAGEMENT COMMANDS ===\n"
@@ -158,11 +211,11 @@ static void print_help(void) {
         "off <core_id>            : Turn off a core\n"
         "powerdown <core_id>      : Power down a core\n"
         "standby <core_id>        : Put a core in standby mode\n"
-        "on <core_id>             : Turn on a core\n"
-        "\n"
+        "on <core_id>             : Turn on a core\n\n"
     );
 }
 
+// === String helpers ===
 static int str_eq(const char *a, const char *b) {
     while (*a && *b && *a == *b) {
         a++;
@@ -184,17 +237,16 @@ static char *next_token(char **p) {
         *p = start;
         return seL4_Null;
     }
-    
+
     char *end = start;
     while (*end && *end != ' ' && *end != '\t' && *end != '\r' && *end != '\n') {
         end++;
     }
-    
+
     if (*end) {
         *end = '\0';
         end++;
     }
-    
     *p = end;
     return start;
 }
@@ -202,16 +254,19 @@ static char *next_token(char **p) {
 static int str_to_int(const char *s) {
     int val = 0;
     int is_negative = 0;
-    
+
     if (*s == '-') {
         is_negative = 1;
         s++;
     }
-    
+
     while (*s >= '0' && *s <= '9') {
         val = val * 10 + (*s - '0');
         s++;
     }
-    
-    return is_negative ? -val : val;
+
+    if (is_negative) {
+        return -val;
+    }
+    return val;
 }

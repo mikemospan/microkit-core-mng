@@ -96,14 +96,6 @@ _name##_end:
     isb
 .endm
 
-.macro disable_id_cache sctlr tmp
-    mrs     \tmp, \sctlr
-    bic     \tmp, \tmp, #(1 << 2)
-    bic     \tmp, \tmp, #(1 << 12)
-    msr     \sctlr, \tmp
-    isb
-.endm
-
 /* Assembler Macros */
 .macro dcache op
     dsb     sy

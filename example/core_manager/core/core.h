@@ -1,6 +1,9 @@
 #pragma once
 
 #include <microkit.h>
+#include <stdint.h>
+
+#define MAX_PDS             63
 
 #define PSCI_VERSION_FID    0x84000000
 #define PSCI_CPU_SUSPEND    0x84000001
@@ -32,9 +35,11 @@ typedef enum {
     CORE_STANDBY,
     CORE_MIGRATE,
     CORE_MIGRATE_MONITOR,
-    CORE_STATUS,
-    CORE_DUMP,
+    CORE_STATUS
 } Instruction;
+
+/* Physical entry point for bootstrapping code. */
+uintptr_t bootstrap_entry;
 
 static int print_error(seL4_ARM_SMCContext response) {
     switch (response.x0) {
@@ -51,7 +56,7 @@ static int print_error(seL4_ARM_SMCContext response) {
         microkit_dbg_puts("The core you are trying to turn on, is already on.\n");
         break;
     case PSCI_E_ON_PENDING:
-        microkit_dbg_puts("A previous instruction is still being completed on this core.\n");
+        microkit_dbg_puts("The core you are trying to turn on is already mid turning on.\n");
         break;
     case PSCI_E_INTERNAL_FAILURE:
         microkit_dbg_puts("This specific core cannot be operated on due to physical reasons.\n");
@@ -67,4 +72,11 @@ static int print_error(seL4_ARM_SMCContext response) {
     }
 
     return 1;
+}
+
+static void *memcpy(void *dst, const void *src, uint64_t sz) {
+    char *d = dst;
+    const char *s = src;
+    while (sz--) *d++ = *s++;
+    return dst;
 }

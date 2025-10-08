@@ -847,10 +847,6 @@ int main(void)
 
     disable_caches_el2();
 
-    puts("stack addr: ");
-    puthex64((uintptr_t)(&_stack));
-    puts("\n");
-
 #if NUM_CPUS > 1
     /* Get the CPU ID of the CPU we are booting on. */
     uint64_t boot_cpu_id;

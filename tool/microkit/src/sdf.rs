@@ -20,6 +20,7 @@ use crate::sel4::{Config, IrqTrigger, PageSize};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 
 /// Events that come through entry points (e.g notified or protected) are given an
 /// identifier that is used as the badge at runtime.
@@ -1325,18 +1326,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     }
 
     // Ensure no duplicate IRQs
-    let mut all_irqs = Vec::new();
-    for pd in &pds {
-        for sysirq in &pd.irqs {
-            if all_irqs.contains(&sysirq.irq) {
-                return Err(format!(
-                    "Error: duplicate irq: {} in protection domain: '{}' @ {}:{}:{}",
-                    sysirq.irq, pd.name, filename, pd.text_pos.row, pd.text_pos.col
-                ));
-            }
-            all_irqs.push(sysirq.irq);
-        }
-    }
+    check_irqs(&pds, filename, config.cores as usize)?;
 
     // Ensure no duplicate channel identifiers.
     // This means checking that no interrupt IDs clash with any channel IDs
@@ -1499,4 +1489,36 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         memory_regions: mrs,
         channels,
     })
+}
+
+fn check_irqs(pds: &[ProtectionDomain], filename: &str, num_cores: usize) -> Result<(), String> {
+    // irq -> vector of booleans, indexed by core
+    let mut irq_map: HashMap<u64, Vec<bool>> = HashMap::new();
+
+    for pd in pds {
+        for sysirq in &pd.irqs {
+            let irq = sysirq.irq;
+            let core = pd.cpu as usize;
+
+            let entry = irq_map.entry(irq).or_insert_with(|| vec![false; num_cores]);
+
+            if irq >= 32 && entry.iter().any(|&used| used) {
+                // IRQs >= 32 must only ever appear once globally
+                return Err(format!(
+                    "Error: duplicate irq: {} in protection domain: '{}' @ {}:{}:{}",
+                    irq, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                ));
+            } else if entry[core]  {
+                // IRQs < 32: can appear across cores, but not twice on the same core
+                return Err(format!(
+                    "Error: duplicate irq: {} on core: {} in protection domain: '{}' @ {}:{}:{}",
+                    irq, core, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                ));
+            }
+
+            entry[core] = true;
+        }
+    }
+
+    Ok(())
 }
