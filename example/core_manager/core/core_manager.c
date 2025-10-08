@@ -2,7 +2,7 @@
 #include "uart.h"
 
 #define API_CHANNEL 1
-#define DELETE     127
+#define DELETE      127
 
 // Each entry corresponds to a core and the PDs it is running
 char core_pds[NUM_CPUS][MAX_PDS][MICROKIT_PD_NAME_LENGTH];
@@ -35,15 +35,17 @@ void init(void) {
     cmd_buffer[0] = '\0';
     cmd_len = 0;
     uart_init();
-    uart_puts("Test\n");
 
+#if defined(CONFIG_PLAT_MAAXBOARD)
+    /* TODO: Get UART RX IRQs working on Maaxboard */
     while (1) {
         char input = uart_getc();
-        if (input != 0) {
+        if (input != '\0') {
             uart_putc(input);
             handle_user_input(input);
         }
     }
+#endif
 }
 
 void notified(microkit_channel ch) {
@@ -53,8 +55,6 @@ void notified(microkit_channel ch) {
         uart_putc('\n');
         return;
     }
-
-    microkit_dbg_puts("got irq\n");
 
     char input = uart_getc();
     uart_putc(input);
