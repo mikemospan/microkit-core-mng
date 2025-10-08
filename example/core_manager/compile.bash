@@ -103,7 +103,7 @@ if [ "$REBUILD_SDK" = true ]; then
 fi
 
 # --- Prepare build directory ---
-mkdir -p "$BUILD_DIR"
+mkdir -p "$EXAMPLE_DIR/$BUILD_DIR"
 
 # --- Set up the make targets ---
 MAKE_TARGETS="-B"
