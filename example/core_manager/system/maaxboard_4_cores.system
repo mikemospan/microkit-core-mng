@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <system>
-    <memory_region name="uart" size="0x1_000" phys_addr="0x30860000"/>
+    <memory_region name="uart" size="0x1_000" phys_addr="0x30_860_000"/>
     <memory_region name="uart_buffer" size="0x1_000"/>
     <memory_region name="worker_buffer" size="0x1_000"/>
     <memory_region name="bootstrap_mem" size="0x10_000" phys_addr="0x60_000_000"/>

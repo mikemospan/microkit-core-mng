@@ -35,17 +35,6 @@ void init(void) {
     cmd_buffer[0] = '\0';
     cmd_len = 0;
     uart_init();
-
-#if defined(CONFIG_PLAT_MAAXBOARD)
-    /* TODO: Get UART RX IRQs working on Maaxboard */
-    while (1) {
-        char input = uart_getc();
-        if (input != '\0') {
-            uart_putc(input);
-            handle_user_input(input);
-        }
-    }
-#endif
 }
 
 void notified(microkit_channel ch) {

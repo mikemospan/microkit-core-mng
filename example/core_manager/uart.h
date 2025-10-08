@@ -12,16 +12,22 @@ uintptr_t uart_base_vaddr;
 #ifdef CONFIG_PLAT_ODROIDC4
 #define UART_WFIFO              0x00
 #define UART_RFIFO              0x04
+#define UART_CTRL               0x08
 #define UART_STATUS             0x0c
+#define UART_IRQ_CTRL           0x10
 
 #define UART_RX_EMPTY           BIT(20)
 #define UART_TX_FULL            BIT(21)
+#define UART_RX_INT_EN          BIT(27)
 
 #define UART_RECV_IRQ_MASK      0xff
 #define UART_RECV_IRQ(c)        ((c) & 0xff)
 
 static inline void uart_init(void) {
-    
+    /* Enable RX byte interrupts */
+    UART_REG(UART_IRQ_CTRL) &= ~UART_RECV_IRQ_MASK;
+    UART_REG(UART_IRQ_CTRL) |= UART_RECV_IRQ(1);
+    UART_REG(UART_CTRL) |= UART_RX_INT_EN;
 }
 
 static void uart_putc(char ch) {
@@ -53,56 +59,33 @@ static char uart_getc(void) {
 }
 
 #elif defined(CONFIG_PLAT_MAAXBOARD)
-#define STAT 0x98
-#define TRANSMIT 0x40
-#define STAT_TDRE (1 << 14)
-#define UART_FCR_RXTL_MASK          (0x3F)
-#define UART_FCR_RXTL_SHFT          (0)
-#define UART_FCR 0x90
-
+#define UART_RXD                0x0
+#define UART_TRANSMIT           0x40
+#define UART_CTRL               0x80
+#define UART_FCR                0x90
+#define UART_STAT               0x98
 #define UART_TS                 0xb4
-#define UART_TST_RX_FIFO_EMPTY      BIT(5)          /* Rx FIFO is empty. */
-#define UART_RXD    0x0
-#define UART_CR2_RX_EN              BIT(1)
-#define UART_CR2    0x84
 
-#define UART_CR2_WORD_SZE           BIT(5)
-#define UART_CR2_STOP_BITS          BIT(6)
-
-#define UART_CR2_PARITY_EN          BIT(8)          /* Enables the parity generator and checker. */
-#define UART_CR2_ESCAPE_EN          BIT(11)         /* Enables the escape sequence detection logic. */
-#define UART_CR2_ESCAPE_INT         BIT(15)         /* Enables escape interupts. */
-#define UART_CR2_AGE_EN             BIT(3)
+#define UART_TST_RX_FIFO_EMPTY  BIT(5)
+#define UART_CR1_RX_READY_INT   BIT(9)
+#define UART_STAT_TDRE          BIT(14)
 
 static void uart_init(void) {
-    /* Enable receiver */
-    UART_REG(UART_CR2) |= UART_CR2_RX_EN;
-
-    /* Configure stop bit length to 1 and data length to 8 */
-    UART_REG(UART_CR2) &= ~(UART_CR2_STOP_BITS);
-    UART_REG(UART_CR2) |= UART_CR2_WORD_SZE;
-
-    /* Disable escape sequence, parity checking and aging rx data interrupts. */
-    UART_REG(UART_CR2) &= ~UART_CR2_PARITY_EN;
-    UART_REG(UART_CR2) &= ~(UART_CR2_ESCAPE_EN | UART_CR2_ESCAPE_INT);
-    UART_REG(UART_CR2) &= ~UART_CR2_AGE_EN;
-
-    /* Enable receive interrupts every byte */
-    UART_REG(UART_FCR) &= ~UART_FCR_RXTL_MASK;
-    UART_REG(UART_FCR) |= (1 << UART_FCR_RXTL_SHFT);
+    /* Enable receive interrupts */
+    UART_REG(UART_CTRL) |= UART_CR1_RX_READY_INT;
 }
 
 static void uart_putc(char ch) {
-    while (!(UART_REG(STAT) & STAT_TDRE));
-    UART_REG(TRANSMIT) = ch;
+    while (!(UART_REG(UART_STAT) & UART_STAT_TDRE));
+    UART_REG(UART_TRANSMIT) = ch;
 
     // Handle cursor: ensure both LF and CR are sent
     if (ch == '\n') {
-        while (!(UART_REG(STAT) & STAT_TDRE));
-        UART_REG(TRANSMIT) = '\r';
+        while (!(UART_REG(UART_STAT) & UART_STAT_TDRE));
+        UART_REG(UART_TRANSMIT) = '\r';
     } else if (ch == '\r') {
-        while (!(UART_REG(STAT) & STAT_TDRE));
-        UART_REG(TRANSMIT) = '\n';
+        while (!(UART_REG(UART_STAT) & UART_STAT_TDRE));
+        UART_REG(UART_TRANSMIT) = '\n';
     }
 }
 
@@ -120,22 +103,21 @@ static char uart_getc(void) {
 }
 
 #elif defined(CONFIG_PLAT_QEMU_ARM_VIRT)
-
-#define RHR_MASK               0b111111111
-#define UARTDR                 0x000
-#define UARTFR                 0x018
-#define UARTIMSC               0x038
-#define UARTICR                0x044
-#define PL011_UARTFR_TXFF      (1 << 5)
-#define PL011_UARTFR_RXFE      (1 << 4)
+#define UART_DR                 0x00
+#define UART_FR                 0x18
+#define UART_IMSC               0x38
+#define UART_ICR                0x44
+#define PL011_UART_FR_TXFF      BIT(5)
+#define PL011_UART_FR_RXFE      BIT(4)
 
 static void uart_init(void) {
-    UART_REG(UARTIMSC) = 0x50;
+    /* Enable receive interrupt and receive timeout interrupt. */
+    UART_REG(UART_IMSC) = 0b1010000;
 }
 
 static void uart_putc(char ch) {
-    while ((UART_REG(UARTFR) & PL011_UARTFR_TXFF) != 0);
-    UART_REG(UARTDR) = ch;
+    while ((UART_REG(UART_FR) & PL011_UART_FR_TXFF) != 0);
+    UART_REG(UART_DR) = ch;
     if (ch == '\r') {
         uart_putc('\n');
     }
@@ -143,16 +125,12 @@ static void uart_putc(char ch) {
 
 static int uart_getc(void) {
     char ch = '\n';
-    if ((UART_REG(UARTFR) & PL011_UARTFR_RXFE) == 0) {
-        ch = UART_REG(UARTDR) & RHR_MASK;
+    while (!(UART_REG(UART_FR) & PL011_UART_FR_RXFE)) {
+        ch = UART_REG(UART_DR);
     }
-    switch (ch) {
-    case '\n':
-        ch = '\r';
-        break;
-    case 8:
-        ch = 0x7f;
-        break;
+
+    if (ch == 8) {
+        ch = 127; // Map backspace to delete
     }
     return ch;
 }
