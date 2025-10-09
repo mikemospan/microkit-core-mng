@@ -72,6 +72,10 @@ void secondary_cpu_entry(uint64_t cpu_id) {
         FAIL();
     }
 
+    /* seL4 relies on the timer to be set to a useful value */
+    puts("Resetting CNTVOFF\n");
+    asm volatile("msr cntvoff_el2, xzr");
+
     /* Reset virtual offset timer for EL2 */
     puts("Resetting CNTVOFF\n");
     asm volatile("msr cntvoff_el2, xzr");

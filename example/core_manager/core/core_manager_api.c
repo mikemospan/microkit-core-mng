@@ -66,7 +66,10 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     switch (instruction_vaddr[0]) {
         case CORE_ON:
             core_on(core, bootstrap_entry);
-            // microkit_pd_restart(core + 1, PD_INIT_ENTRY);
+#if defined(CONFIG_PLAT_QEMU_ARM_VIRT)
+            // TODO: FIX THIS
+            microkit_pd_restart(core + 1, PD_INIT_ENTRY);
+#endif
             break;
         case CORE_OFF:
         case CORE_POWERDOWN:
