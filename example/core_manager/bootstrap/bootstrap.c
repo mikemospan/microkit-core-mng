@@ -20,6 +20,7 @@ typedef void (*sel4_entry)(
     uintptr_t extra_device_size
 );
 
+void el2_mmu_enable(void);
 
 /* Temporary hardware page tables for boot */
 uint64_t boot_lvl0_lower[512] ALIGN(4096);
@@ -76,12 +77,11 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     puts("Resetting CNTVOFF\n");
     asm volatile("msr cntvoff_el2, xzr");
 
-    /* Reset virtual offset timer for EL2 */
-    puts("Resetting CNTVOFF\n");
-    asm volatile("msr cntvoff_el2, xzr");
-
     /* Save CPU ID in TPIDR_EL1 for seL4 */
     asm volatile("msr tpidr_el1, %0" :: "r"(cpu_id));
+
+    puts("Enabling the MMU\n");
+    el2_mmu_enable();
 
     puts("Starting the seL4 kernel\n");
     START_KERNEL();
