@@ -58,6 +58,10 @@ static char uart_getc(void) {
     return ch;
 }
 
+static void uart_handle_irq(void) {
+    
+}
+
 #elif defined(CONFIG_PLAT_MAAXBOARD)
 #define UART_RXD                0x0
 #define UART_TRANSMIT           0x40
@@ -102,6 +106,10 @@ static char uart_getc(void) {
     return ch;
 }
 
+static void uart_handle_irq(void) {
+    
+}
+
 #elif defined(CONFIG_PLAT_QEMU_ARM_VIRT)
 #define UART_DR                 0x00
 #define UART_FR                 0x18
@@ -124,7 +132,7 @@ static void uart_putc(char ch) {
 }
 
 static int uart_getc(void) {
-    char ch = '\n';
+    char ch = '\0';
     while (!(UART_REG(UART_FR) & PL011_UART_FR_RXFE)) {
         ch = UART_REG(UART_DR);
     }
@@ -133,6 +141,69 @@ static int uart_getc(void) {
         ch = 127; // Map backspace to delete
     }
     return ch;
+}
+
+static void uart_handle_irq(void) {
+    
+}
+
+#elif defined (CONFIG_PLAT_ZYNQMP)
+#define UART_CHANNEL_STS_TXEMPTY 0x8
+#define UART_CHANNEL_STS         0x2C
+#define UART_TX_RX_FIFO          0x30
+#define ZYNQMP_UART_IDR           0x0C  /* Interrupt Disable */
+#define ZYNQMP_UART_IXR_MASK    0x00001FFFU /**< Valid bit mask */
+#define ZYNQMP_UART_ISR           0x14  /* Interrupt Status */
+#define ZYNQMP_UART_RXWM          0x20  /* RX FIFO Trigger Level */
+#define ZYNQMP_UART_IER           0x08  /* Interrupt Enable */
+#define ZYNQMP_UART_IXR_RXOVR   0x00000001U /**< RX FIFO trigger interrupt. */
+
+#define UART_CR             0x00
+#define UART_CR_TX_EN       BIT(4)
+#define UART_CR_TX_DIS      BIT(5)
+#define UART_CHANNEL_STS_RXEMPTY  BIT(1)
+
+static void uart_init(void) {
+    /* Turn off all the interrupts, then only turn on the ones we need. */
+    UART_REG(ZYNQMP_UART_IDR) = ZYNQMP_UART_IXR_MASK;
+    UART_REG(ZYNQMP_UART_ISR) = ZYNQMP_UART_IXR_MASK;
+
+    /* Set the watermark to raise an interrupt for every received byte. */
+    UART_REG(ZYNQMP_UART_RXWM) = 1;
+    /* Enable IRQ on every bytes received. */
+    UART_REG(ZYNQMP_UART_IER) = ZYNQMP_UART_IXR_RXOVR;
+}
+
+static void uart_putc(uint8_t ch) {
+    while (!(UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_TXEMPTY));
+    UART_REG(UART_TX_RX_FIFO) = ch;
+
+    // Handle cursor: ensure both LF and CR are sent
+    if (ch == '\n') {
+        while (!(UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_TXEMPTY));
+        UART_REG(UART_TX_RX_FIFO) = '\r';
+    } else if (ch == '\r') {
+        while (!(UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_TXEMPTY));
+        UART_REG(UART_TX_RX_FIFO) = '\n';
+    }
+}
+
+static char uart_getc(void) {
+    char ch = '\0';
+    while (!(UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_RXEMPTY)) {
+        ch = UART_REG(UART_TX_RX_FIFO);
+    }
+
+    if (ch == 8) {
+        ch = 127; // Map backspace to delete
+    }
+    return ch;
+}
+
+static void uart_handle_irq(void) {
+    /* Read and clear the IRQ status bits so we don't get infinitely interrupted. */
+    uint32_t irq_status = UART_REG(ZYNQMP_UART_ISR);
+    UART_REG(ZYNQMP_UART_ISR) = irq_status;
 }
 #endif
 

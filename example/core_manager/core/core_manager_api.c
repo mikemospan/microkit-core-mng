@@ -27,13 +27,12 @@ uint8_t monitor_core = 0;
 // Number of cores currently on
 uint8_t cores_on = NUM_CPUS;
 
-char *test_vaddr;
-
 // === Core operation prototypes ===
 static inline void core_migrate(uint8_t pd, uint8_t core);
 static inline void monitor_migrate(uint8_t core);
 static void core_on(uint8_t core, seL4_Word cpu_bootstrap);
 static seL4_Word core_status(uint8_t core, seL4_Bool print);
+static uint32_t psci_version(void);
 
 // === Microkit API functions ===
 void init(void) {
@@ -50,6 +49,16 @@ void init(void) {
     }
     
     asm volatile("dsb ish");
+
+    uint32_t ver = psci_version();
+    uint32_t major = (ver >> 16) & 0xFFFF;
+    uint32_t minor = ver & 0xFFFF;
+
+    uart_puts("Using PSCI v");
+    uart_put64(major);
+    uart_putc('.');
+    uart_put64(minor);
+    uart_puts(".\n");
 }
 
 void notified(microkit_channel ch) {
@@ -174,6 +183,16 @@ static seL4_Word core_status(uint8_t core, seL4_Bool print) {
         uart_puts(status_str);
         uart_putc('\n');
     }
+
+    return response.x0;
+}
+
+static uint32_t psci_version(void) {
+    seL4_ARM_SMCContext args = {.x0 = PSCI_VERSION_FID};
+    seL4_ARM_SMCContext response = {0};
+    microkit_arm_smc_call(&args, &response);
+
+    print_error(response);
 
     return response.x0;
 }

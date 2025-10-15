@@ -110,6 +110,22 @@ SUPPORTED_BOARDS = (
         },
     ),
     BoardInfo(
+        name="zcu102_4_cores",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a53",
+        loader_link_address=0x40000000,
+        kernel_options={
+            "KernelPlatform": "zynqmp",
+            "KernelARMPlatform": "zcu102",
+            "KernelIsMCS": True,
+            "KernelArmExportPCNTUser": True,
+            "KernelArmHypervisorSupport": True,
+            "KernelArmVtimerUpdateVOffset": False,
+            "KernelMaxNumNodes": "4",
+            "KernelAllowSMCCalls": True,
+        },
+    ),
+    BoardInfo(
         name="maaxboard",
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
@@ -120,7 +136,6 @@ SUPPORTED_BOARDS = (
             "KernelArmExportPCNTUser": True,
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
-            "KernelMaxNumNodes": "4",
         },
     ),
     BoardInfo(

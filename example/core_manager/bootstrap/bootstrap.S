@@ -172,6 +172,13 @@ finished_\op:
 .endm
 
 BEGIN_FUNC(bootstrap_start)
+// loop:
+    // movk x0, 0xff00, LSL #16
+
+    // mov w2, #'B'
+    // str w2, [x0, 0x30]
+    // b loop
+
     // Get current CPU ID from MPIDR_EL1
     mrs x0, mpidr_el1
     and x0, x0, #0xFF           // Extract CPU ID (bits [7:0])
@@ -184,7 +191,6 @@ BEGIN_FUNC(bootstrap_start)
     add  x1, x2, x1                // x1 = base + cpu_id * STACK_SIZE
     add  x1, x1, #STACK_SIZE       // x1 = top of stack for this CPU
     mov  sp, x1
-
 
     bl secondary_cpu_entry
    

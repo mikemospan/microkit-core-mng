@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <system>
+    <memory_region name="bootstrap_mem" size="0x10_000" phys_addr="0x80_000_000"/>
     <memory_region name="uart" size="0x1_000" phys_addr="0xff_803_000"/>
     <memory_region name="uart_buffer" size="0x1_000"/>
     <memory_region name="worker_buffer" size="0x1_000"/>
-    <memory_region name="bootstrap_mem" size="0x10_000" phys_addr="0x80_000_000"/>
     
     <protection_domain name="core_manager_api" priority="254" smc="true">
         <program_image path="core_manager_api.elf"/>
@@ -11,7 +11,6 @@
         <map mr="bootstrap_mem" vaddr="0x5000000" perms="rwx" setvar_vaddr="bootstrap_vaddr"/>
         <map mr="worker_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="instruction_vaddr"/>
         <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
-        <setvar symbol="uart_phys" region_paddr="uart"/>
 
         <protection_domain name="core_worker0" priority="253" cpu="0" smc="true" id="1">
             <program_image path="core_worker.elf"/>

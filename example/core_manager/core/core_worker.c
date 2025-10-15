@@ -9,10 +9,23 @@ static void core_suspend(seL4_Bool power_down);
 
 // Pointer to instruction received from Core Manager
 Instruction *instruction_vaddr;
+// === External symbols ===
+void *bootstrap_vaddr;
+extern char bootstrap_start[];
+extern char bootstrap_end[];
 
 // === Microkit API functions ===
 void init(void) {
+    uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
+    uintptr_t start = (uintptr_t)bootstrap_vaddr;
+    uintptr_t end = start + bootstrap_size;
+    for (uintptr_t addr = start; addr < end; addr += 0x1000) {
+        uintptr_t page_end = addr + 0x1000 - 1;
+        seL4_ARM_VSpace_CleanInvalidate_Data(3, addr, page_end);
+        seL4_ARM_VSpace_Unify_Instruction(3, addr, page_end);
+    }
     
+    asm volatile("dsb ish");
 }
 
 void notified(microkit_channel ch) {

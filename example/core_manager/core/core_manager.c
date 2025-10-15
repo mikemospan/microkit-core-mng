@@ -32,9 +32,9 @@ static void print_help(void);
 
 // === Microkit API functions ===
 void init(void) {
+    uart_init();
     cmd_buffer[0] = '\0';
     cmd_len = 0;
-    uart_init();
 }
 
 void notified(microkit_channel ch) {
@@ -44,6 +44,9 @@ void notified(microkit_channel ch) {
         uart_putc('\n');
         return;
     }
+
+    /* Some boards need this, implementation is not always necessary. */
+    uart_handle_irq();
 
     char input = uart_getc();
     uart_putc(input);

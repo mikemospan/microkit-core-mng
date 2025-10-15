@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "serial.h"
 
 #define STACK_SIZE 4096
 #define ALIGN(n) __attribute__((__aligned__(n)))
@@ -31,22 +32,8 @@ uint64_t boot_lvl2_upper[512] ALIGN(4096);
 
 /* Kernel entry point address */
 uintptr_t kernel_entry;
-/* Physical entry point for UART. */
-volatile uint32_t *uart_phys;
-
 /* Stack for each CPU core */
 volatile uint8_t cpu_stacks[NUM_CPUS][STACK_SIZE] ALIGN(16);
-
-/* --- Simple UART output --- */
-static inline void putc(int ch) {
-    *uart_phys = ch;
-}
-
-static inline void puts(const char *str) {
-    while (*str) {
-        putc(*str++);
-    }
-}
 
 /* Get current exception level */
 static inline uint32_t current_el(void) {
@@ -61,12 +48,12 @@ void secondary_cpu_entry(uint64_t cpu_id) {
 
     puts("[Core Manager]: Booting CPU #");
     putc(cpu_id + '0');
-    putc('\n');
+    puts("\n");
 
     uint32_t el = current_el();
     puts("CurrentEL = EL");
     putc(el + '0');
-    putc('\n');
+    puts("\n");
 
     if (el != 2) {
         puts("Error: not in EL2!\n");

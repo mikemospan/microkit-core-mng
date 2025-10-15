@@ -43,7 +43,7 @@ else ifeq ($(ARCH),riscv64)
 	ARCH_DIR := riscv
 endif
 
-CFLAGS := -std=gnu11 -g -O0 -nostdlib -ffreestanding $(CFLAGS_ARCH) -DNUM_CPUS=$(NUM_CPUS) -DBOARD_$(BOARD) -DPRINTING=$(PRINTING) -Wall -Werror -Wno-unused-function
+CFLAGS := -std=gnu11 -g -O0 -nostdlib -ffreestanding $(CFLAGS_ARCH) -DNUM_CPUS=$(NUM_CPUS) -DBOARD_$(BOARD) -DPRINTING=$(PRINTING) -Wall -Werror -Wno-unused-function -I./include
 
 ASM_FLAGS := $(ASM_FLAGS_ARCH) -DNUM_CPUS=$(NUM_CPUS) -g
 

@@ -3704,7 +3704,9 @@ fn main() -> Result<(), String> {
 
     if system.protection_domains[0].name == "core_manager_api" {
         let core_manager_elf = &mut pd_elf_files[0];
-        let mut core_manager = CoreManager::new(&kernel_elf, core_manager_elf);
+        assert!(system.memory_regions[0].name.contains("bootstrap"));
+        let bootstrap_addr = system.memory_regions[0].phys_addr.expect("Bootstrap region does not have a phys addr");
+        let mut core_manager = CoreManager::new(&kernel_elf, core_manager_elf, bootstrap_addr);
         core_manager.patch_elf().expect("Failed to patch core manager api elf");
     }
 

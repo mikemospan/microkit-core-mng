@@ -11,7 +11,7 @@ pub struct CoreManager<'a> {
 }
 
 impl<'a> CoreManager<'a> {
-    pub fn new(kernel_elf: &'a ElfFile, target_elf: &'a mut ElfFile) -> CoreManager<'a> {
+    pub fn new(kernel_elf: &'a ElfFile, target_elf: &'a mut ElfFile, bootstrap_addr: u64) -> CoreManager<'a> {
         let mut kernel_first_vaddr = None;
         let mut kernel_last_vaddr = None;
         let mut kernel_first_paddr = None;
@@ -49,6 +49,7 @@ impl<'a> CoreManager<'a> {
             target_elf,
             kernel_first_vaddr.unwrap(),
             kernel_first_paddr.unwrap(),
+            bootstrap_addr
         );
 
         CoreManager {
@@ -74,6 +75,7 @@ impl<'a> CoreManager<'a> {
         elf: &ElfFile,
         first_vaddr: u64,
         first_paddr: u64,
+        bootstrap_addr: u64
     ) -> Vec<(u64, u64, [u8; PAGE_TABLE_SIZE])> {
         let (mut boot_lvl1_lower_addr, boot_lvl1_lower_size) = elf
             .find_symbol("boot_lvl1_lower")
@@ -95,11 +97,11 @@ impl<'a> CoreManager<'a> {
         let (bootstrap_start_vaddr, _) = elf
             .find_symbol("bootstrap_start")
             .expect("Could not find 'bootstrap_start' symbol");
-        boot_lvl1_lower_addr = (boot_lvl1_lower_addr - bootstrap_start_vaddr) | 0x80000000;
-        boot_lvl1_upper_addr = (boot_lvl1_upper_addr - bootstrap_start_vaddr) | 0x80000000;
-        boot_lvl2_upper_addr = (boot_lvl2_upper_addr - bootstrap_start_vaddr) | 0x80000000;
-        boot_lvl0_lower_addr = (boot_lvl0_lower_addr - bootstrap_start_vaddr) | 0x80000000;
-        boot_lvl0_upper_addr = (boot_lvl0_upper_addr - bootstrap_start_vaddr) | 0x80000000;
+        boot_lvl1_lower_addr = (boot_lvl1_lower_addr - bootstrap_start_vaddr) | bootstrap_addr;
+        boot_lvl1_upper_addr = (boot_lvl1_upper_addr - bootstrap_start_vaddr) | bootstrap_addr;
+        boot_lvl2_upper_addr = (boot_lvl2_upper_addr - bootstrap_start_vaddr) | bootstrap_addr;
+        boot_lvl0_lower_addr = (boot_lvl0_lower_addr - bootstrap_start_vaddr) | bootstrap_addr;
+        boot_lvl0_upper_addr = (boot_lvl0_upper_addr - bootstrap_start_vaddr) | bootstrap_addr;
 
         // Continue with normal page table setting
         Loader::aarch64_setup_pagetables_with_addrs(boot_lvl1_lower_addr, boot_lvl1_lower_size,
