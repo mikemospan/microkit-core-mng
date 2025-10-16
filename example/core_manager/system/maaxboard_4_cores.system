@@ -40,9 +40,14 @@
             <program_image path="core_manager.elf"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <map mr="uart_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="cmd_buffer"/>
-            <irq irq="58" id="2"/>
+            <irq irq="58" id="2"/> <!-- UART interrupt -->
         </protection_domain>
     </protection_domain>
+
+    <channel>
+        <end pd="core_manager" id="1" pp="true"/>
+        <end pd="core_manager_api" id="1"/>
+    </channel>
 
     <channel>
         <end pd="core_worker0" id="1"/>
@@ -62,10 +67,5 @@
     <channel>
         <end pd="core_worker3" id="1"/>
         <end pd="core_manager_api" id="5"/>
-    </channel>
-
-    <channel>
-        <end pd="core_manager" id="1" pp="true"/>
-        <end pd="core_manager_api" id="1"/>
     </channel>
 </system>

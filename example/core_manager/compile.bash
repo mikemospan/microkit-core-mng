@@ -119,7 +119,7 @@ fi
 
 # --- Run make ---
 echo "Building project for board: $BOARD"
-make -C "$EXAMPLE_DIR" \
+make -C "$EXAMPLE_DIR" -j$(nproc) \
     BUILD_DIR="$BUILD_DIR" \
     LOADER_DIR="$LOADER_DIR" \
     MICROKIT_BOARD="$BOARD" \

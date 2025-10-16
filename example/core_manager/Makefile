@@ -11,14 +11,21 @@ MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
 CORE_DIR := core
+PROFILER_DIR := profiler
 BOOTSTRAP_DIR := bootstrap
 IMAGES := core_manager.elf core_manager_api.elf core_worker.elf
-CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror \
-          -I. -I$(BOARD_DIR)/include -I$(CORE_DIR) -DNUM_CPUS=$(NUM_CPUS) -DBOARD_$(MICROKIT_BOARD) \
-		  -DPRINTING=$(PRINTING)
 LDFLAGS := -L$(BOARD_DIR)/lib -T $(BOOTSTRAP_DIR)/bootstrap.ld
-LIBS := -lmicrokit -Tmicrokit.ld
+CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror \
+          -I. -I$(BOARD_DIR)/include -I$(CORE_DIR) -I$(PROFILER_DIR) \
+          -DNUM_CPUS=$(NUM_CPUS) -DBOARD_$(MICROKIT_BOARD) -DPRINTING=$(PRINTING)
 
+ifeq ($(MICROKIT_CONFIG),benchmark)
+CFLAGS += -DCONFIG_BENCHMARK=1
+else
+CFLAGS += -DCONFIG_BENCHMARK=0
+endif
+
+LIBS := -lmicrokit -Tmicrokit.ld
 IMAGE_FILE = $(BUILD_DIR)/loader.img
 REPORT_FILE = $(BUILD_DIR)/report.txt
 QEMU := qemu-system-aarch64

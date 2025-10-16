@@ -6,16 +6,10 @@
 #define MAX_PDS             63
 
 #define PSCI_VERSION_FID    0x84000000
-#define PSCI_CPU_SUSPEND    0x84000001
+#define PSCI_CPU_SUSPEND    0xC4000001
 #define PSCI_CPU_OFF        0x84000002
-
-#ifdef ARCH_aarch64
 #define PSCI_CPU_ON         0xC4000003
 #define PSCI_AFFINITY_INFO  0xC4000004
-#else
-#define PSCI_CPU_ON         0x84000003
-#define PSCI_AFFINITY_INFO  0x84000004
-#endif
 
 /* Possible Error Codes */
 #define PSCI_SUCCESS                0

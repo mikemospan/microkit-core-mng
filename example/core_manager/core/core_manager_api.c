@@ -80,10 +80,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     switch (instruction_vaddr[0]) {
         case CORE_ON:
             core_on(core, bootstrap_entry);
-#if defined(CONFIG_PLAT_QEMU_ARM_VIRT)
-            // TODO: FIX THIS
             microkit_pd_restart(core + 1, PD_INIT_ENTRY);
-#endif
             break;
         case CORE_OFF:
         case CORE_POWERDOWN:
@@ -175,7 +172,7 @@ static inline void monitor_migrate(uint8_t core) {
 
 static seL4_Word core_status(uint8_t core, seL4_Bool print) {
     seL4_ARM_SMCContext args = {.x0 = PSCI_AFFINITY_INFO, .x1 = core};
-    seL4_ARM_SMCContext response = {0};
+    seL4_ARM_SMCContext response;
     microkit_arm_smc_call(&args, &response);
 
     int err = print_error(response);
@@ -194,7 +191,7 @@ static seL4_Word core_status(uint8_t core, seL4_Bool print) {
 
 static uint32_t psci_version(void) {
     seL4_ARM_SMCContext args = {.x0 = PSCI_VERSION_FID};
-    seL4_ARM_SMCContext response = {0};
+    seL4_ARM_SMCContext response;
     microkit_arm_smc_call(&args, &response);
 
     print_error(response);

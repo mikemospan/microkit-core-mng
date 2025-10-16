@@ -364,6 +364,7 @@ SUPPORTED_CONFIGS = (
             "KernelArmExportPMUUser": True,
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
+            "KernelPrinting": True,
             "KernelBenchmarks": "track_utilisation"
         },
     ),
