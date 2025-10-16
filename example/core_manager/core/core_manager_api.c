@@ -40,12 +40,17 @@ void init(void) {
     uint64_t bootstrap_size = (uintptr_t)bootstrap_end - (uintptr_t)bootstrap_start;
     memcpy(bootstrap_vaddr, bootstrap_start, bootstrap_size);
 
+    /* This step is necessary! We loop over the bootstrap region page by page,
+    * and flush the data cache to ensure memory coherency before the new core
+    * attempts to execute code from this region. We use CleanInvalidate to
+    * ensure that if the memory region is already mapped in the new core's
+    * page tables, it will also be invalidated from the instruction cache.
+    */
     uintptr_t start = (uintptr_t)bootstrap_vaddr;
     uintptr_t end = start + bootstrap_size;
-    for (uintptr_t addr = start; addr < end; addr += 0x1000) {
-        uintptr_t page_end = addr + 0x1000 - 1;
+    for (uintptr_t addr = start; addr < end; addr += 1 << seL4_PageBits) {
+        uintptr_t page_end = addr + (1 << seL4_PageBits);
         seL4_ARM_VSpace_CleanInvalidate_Data(3, addr, page_end);
-        seL4_ARM_VSpace_Unify_Instruction(3, addr, page_end);
     }
     
     asm volatile("dsb ish");
@@ -56,7 +61,7 @@ void init(void) {
 
     uart_puts("Using PSCI v");
     uart_put64(major);
-    uart_putc('.');
+    uart_puts(".");
     uart_put64(minor);
     uart_puts(".\n");
 }
@@ -181,7 +186,7 @@ static seL4_Word core_status(uint8_t core, seL4_Bool print) {
         uart_put64(core);
         uart_puts(" is ");
         uart_puts(status_str);
-        uart_putc('\n');
+        uart_puts("\n");
     }
 
     return response.x0;

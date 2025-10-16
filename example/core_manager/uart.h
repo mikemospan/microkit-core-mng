@@ -34,15 +34,6 @@ static void uart_putc(char ch) {
     // Wait until UART can accept a new character
     while ((UART_REG(UART_STATUS) & UART_TX_FULL));
     UART_REG(UART_WFIFO) = ch;
-
-    // Handle cursor: ensure both LF and CR are sent
-    if (ch == '\n') {
-        while ((UART_REG(UART_STATUS) & UART_TX_FULL));
-        UART_REG(UART_WFIFO) = '\r';
-    } else if (ch == '\r') {
-        while ((UART_REG(UART_STATUS) & UART_TX_FULL));
-        UART_REG(UART_WFIFO) = '\n';
-    }
 }
 
 static char uart_getc(void) {
@@ -82,15 +73,6 @@ static void uart_init(void) {
 static void uart_putc(char ch) {
     while (!(UART_REG(UART_STAT) & UART_STAT_TDRE));
     UART_REG(UART_TRANSMIT) = ch;
-
-    // Handle cursor: ensure both LF and CR are sent
-    if (ch == '\n') {
-        while (!(UART_REG(UART_STAT) & UART_STAT_TDRE));
-        UART_REG(UART_TRANSMIT) = '\r';
-    } else if (ch == '\r') {
-        while (!(UART_REG(UART_STAT) & UART_STAT_TDRE));
-        UART_REG(UART_TRANSMIT) = '\n';
-    }
 }
 
 static char uart_getc(void) {
@@ -126,9 +108,6 @@ static void uart_init(void) {
 static void uart_putc(char ch) {
     while ((UART_REG(UART_FR) & PL011_UART_FR_TXFF) != 0);
     UART_REG(UART_DR) = ch;
-    if (ch == '\r') {
-        uart_putc('\n');
-    }
 }
 
 static int uart_getc(void) {
@@ -177,15 +156,6 @@ static void uart_init(void) {
 static void uart_putc(uint8_t ch) {
     while (!(UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_TXEMPTY));
     UART_REG(UART_TX_RX_FIFO) = ch;
-
-    // Handle cursor: ensure both LF and CR are sent
-    if (ch == '\n') {
-        while (!(UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_TXEMPTY));
-        UART_REG(UART_TX_RX_FIFO) = '\r';
-    } else if (ch == '\r') {
-        while (!(UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_TXEMPTY));
-        UART_REG(UART_TX_RX_FIFO) = '\n';
-    }
 }
 
 static char uart_getc(void) {
@@ -208,12 +178,20 @@ static void uart_handle_irq(void) {
 #endif
 
 static void uart_puts(const char *str) {
+#if PRINTING
     for (; *str != '\0'; str++) {
+        if (*str == '\n') {
+            uart_putc('\r');
+        } else if (*str == '\r') {
+            uart_putc('\n');
+        }
         uart_putc(*str);
     }
+#endif
 }
 
 static void uart_put64(uint64_t num) {
+#if PRINTING
     if (num == 0) {
         uart_putc('0');
         return;
@@ -222,9 +200,11 @@ static void uart_put64(uint64_t num) {
         uart_put64(num / 10);
     }
     uart_putc('0' + (num % 10));
+#endif
 }
 
 static void uart_puthex64(uint64_t num) {
+#if PRINTING
     uart_puts("0x");
     int started = 0;
     for (int i = 15; i >= 0; i--) {
@@ -238,4 +218,5 @@ static void uart_puthex64(uint64_t num) {
             }
         }
     }
+#endif
 }

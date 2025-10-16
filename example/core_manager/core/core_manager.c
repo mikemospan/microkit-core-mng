@@ -41,7 +41,7 @@ void notified(microkit_channel ch) {
     if (ch != UART_IRQ_CH) {
         uart_puts("[Core Manager]: Received unexpected notification: ");
         uart_put64(ch);
-        uart_putc('\n');
+        uart_puts("\n");
         return;
     }
 
@@ -49,7 +49,7 @@ void notified(microkit_channel ch) {
     uart_handle_irq();
 
     char input = uart_getc();
-    uart_putc(input);
+    uart_puts(&input);
     handle_user_input(input);
 
     microkit_irq_ack(ch);
@@ -195,7 +195,7 @@ static void dump_core(uint8_t core) {
             uart_put64(pd_id);
             uart_puts("\t");
             uart_puts(name);
-            uart_putc('\n');
+            uart_puts("\n");
         }
     }
 

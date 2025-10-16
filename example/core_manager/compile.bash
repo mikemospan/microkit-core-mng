@@ -6,7 +6,7 @@ EXAMPLE_DIR="example/core_manager"
 BUILD_DIR="build"
 MICROKIT_BOARDS=("qemu_virt_aarch64" "odroidc4_4_cores" "maaxboard_4_cores" "zcu102_4_cores")
 MICROKIT_SDK="release/microkit-sdk-2.0.1-dev"
-MICROKIT_CONFIG="debug"
+MICROKIT_CONFIG="benchmark"
 NUM_CPUS=4
 SEL4_DIR="../seL4"
 LOADER_DIR="../../loader"
@@ -58,7 +58,7 @@ if [ -z "$BOARD" ]; then
         echo "  $b"
     done
     echo ""
-    echo "Usage: $0 -b <board> [-R]"
+    echo "Usage: $0 -b <board> [-p] [-R]"
     exit 1
 fi
 
@@ -71,7 +71,7 @@ if [[ ! " ${MICROKIT_BOARDS[*]} " =~ " ${BOARD} " ]]; then
         echo "  $b"
     done
     echo ""
-    echo "Usage: $0 -b <board> [-R]"
+    echo "Usage: $0 -b <board> [-p] [-R]"
     exit 1
 fi
 
