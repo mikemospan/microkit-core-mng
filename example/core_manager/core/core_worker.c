@@ -17,6 +17,7 @@
 // Function prototypes
 static void core_off(void);
 static void core_suspend(seL4_Bool power_down);
+static void handle_instruction(Instruction instr);
 
 void init_pmu_regs(void);
 void halt_pmu(void);
@@ -48,19 +49,23 @@ void init(void) {
 }
 
 void notified(microkit_channel ch) {
-    if (ch != CORE_MANAGER_CHANNEL) {
-        uart_puts("[Core Worker]: Received unexpected notification: ");
-        uart_put64(ch);
-        uart_puts("\n");
-        return;
+    if (ch == CORE_MANAGER_CHANNEL) {
+        handle_instruction(*instruction_vaddr);
     } else if (ch == PMU_IRQ_CHANNEL) {
 #if CONFIG_BENCHMARK
         uart_puts("[Core Worker]: Received PMU interrupt.\n");
 #endif
-        return;
+    } else {
+        uart_puts("[Core Worker]: Received unexpected notification: ");
+        uart_put64(ch);
+        uart_puts("\n");
     }
+    
+    microkit_irq_ack(ch);
+}
 
-    switch (instruction_vaddr[0]) {
+static void handle_instruction(Instruction instr) {
+    switch (instr) {
         case CORE_OFF:
             uart_puts("[Core Worker]: Turning off core.\n");
             core_off();
@@ -77,8 +82,6 @@ void notified(microkit_channel ch) {
             uart_puts("[Core Worker]: Encountered unexpected instruction.\n");
             break;
     }
-    
-    microkit_irq_ack(ch);
 }
 
 // Power off the core via PSCI call
