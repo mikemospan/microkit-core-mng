@@ -1,53 +1,77 @@
 #include "core.h"
 #include "uart.h"
 
+// ============================================================================
+// Constants
+// ============================================================================
+
 #define API_CHANNEL 1
 #define DELETE      127
 
-// Each entry corresponds to a core and the PDs it is running
+// ============================================================================
+// Global Variables
+// ============================================================================
+
+// Tracks which PDs are running on each core
 char core_pds[NUM_CPUS][MAX_PDS][MICROKIT_PD_NAME_LENGTH];
 
-// Command buffer for user input
+// Command input buffer
 char *cmd_buffer;
 int cmd_len = 0;
 
-// The core the initial task (Monitor) is currently on
+// Current core running the Monitor PD
 uint8_t monitor_core = 0;
 
-// === Helper function prototypes ===
+// ============================================================================
+// Function Prototypes
+// ============================================================================
+
+// String utilities
 static int str_eq(const char *a, const char *b);
 static char *skip_ws(char *p);
 static char *next_token(char **p);
-static int str_to_int(const char *s);
+static int str_to_int(const char *s, seL4_Bool *success);
 
-// === Core management prototypes ===
+// Core management
 static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id);
 static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id);
 static void dump_core(uint8_t core);
 
-// === Command handling prototypes ===
+// Command handling
 static void handle_user_input(char input);
 static void execute_command(char *cmd);
 static void print_help(void);
 
-// === Microkit API functions ===
+// ============================================================================
+// Microkit API Implementation
+// ============================================================================
+
+/**
+ * Initialise the core manager.
+ * Sets up UART and clears the command buffer.
+ */
 void init(void) {
     uart_init();
     cmd_buffer[0] = '\0';
     cmd_len = 0;
 }
 
+/**
+ * Handle UART interrupts for user input.
+ * Reads characters from UART and processes commands.
+ */
 void notified(microkit_channel ch) {
     if (ch != UART_IRQ_CH) {
-        uart_puts("[Core Manager]: Received unexpected notification: ");
+        uart_puts("[Monitor]: Received unexpected notification: ");
         uart_put64(ch);
         uart_puts("\n");
         return;
     }
 
-    /* Some boards need this, implementation is not always necessary. */
+    // Handle platform-specific IRQ acknowledgment
     uart_handle_irq();
 
+    // Read character and echo it back
     char input = uart_getc();
     uart_puts(&input);
     handle_user_input(input);
@@ -55,25 +79,42 @@ void notified(microkit_channel ch) {
     microkit_irq_ack(ch);
 }
 
-// === Command input handling ===
+// ============================================================================
+// Command Input Handling
+// ============================================================================
+
+/**
+ * Process a single character of user input.
+ * Handles command execution on newline and backspace for editing.
+ */
 static void handle_user_input(char input) {
     if (input == '\r' || input == '\n') {
+        uart_puts("\n");
         execute_command(cmd_buffer);
         cmd_len = 0;
         cmd_buffer[0] = '\0';
     } else if (input == DELETE) {
+        // Handle backspace
         if (cmd_len > 0) {
             cmd_len--;
             cmd_buffer[cmd_len] = '\0';
-            uart_puts("\b \b");
+            uart_puts("\b \b");  // Erase character from terminal
         }
     } else {
+        // Append character to buffer
         cmd_buffer[cmd_len++] = input;
         cmd_buffer[cmd_len] = '\0';
     }
 }
 
-// === Command execution ===
+// ============================================================================
+// Command Execution
+// ============================================================================
+
+/**
+ * Parse and execute a user command.
+ * Supports core management operations like migrate, status, on/off, etc.
+ */
 static void execute_command(char *cmd) {
     char *command = next_token(&cmd);
     if (!command) {
@@ -81,74 +122,152 @@ static void execute_command(char *cmd) {
     }
 
     seL4_Bool err = 0;
+    seL4_Bool parse_success;
 
     if (str_eq(command, "help")) {
         print_help();
+
     } else if (str_eq(command, "status")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            err = send_core_command(CORE_STATUS, str_to_int(arg), 0);
+            int core_id = str_to_int(arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                err = send_core_command(CORE_STATUS, core_id, 0);
+            }
         } else {
             uart_puts("Usage: status <core_id>\n");
         }
+
     } else if (str_eq(command, "dump")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            dump_core(str_to_int(arg));
+            int core_id = str_to_int(arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                dump_core(core_id);
+            }
         } else {
             uart_puts("Usage: dump <core_id>\n");
         }
+
     } else if (str_eq(command, "migrate")) {
         char *pd_arg = next_token(&cmd);
         char *core_arg = next_token(&cmd);
 
         if (pd_arg && str_eq(pd_arg, "monitor") && core_arg) {
-            uint8_t core_id = str_to_int(core_arg);
-            err = send_core_command(CORE_MIGRATE_MONITOR, core_id, 0);
-            if (!err) {
-                monitor_core = core_id;
+            // Migrate the Monitor PD
+            int core_id = str_to_int(core_arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                err = send_core_command(CORE_MIGRATE_MONITOR, core_id, 0);
+                if (!err) {
+                    monitor_core = core_id;
+                }
             }
         } else if (pd_arg && core_arg) {
-            uint8_t pd_id = str_to_int(pd_arg);
-            uint8_t core_id = str_to_int(core_arg);
-
-            for (int c = 0; c < NUM_CPUS; c++) {
-                if (core_pds[c][pd_id][0] != '\0') {
-                    err = migrate_pd(c, core_id, pd_id);
-                    break;
+            // Migrate a regular PD
+            int pd_id = str_to_int(pd_arg, &parse_success);
+            if (!parse_success || pd_id < 0 || pd_id >= MAX_PDS) {
+                uart_puts("Error: pd_id must be a number between 0 and ");
+                uart_put64(MAX_PDS - 1);
+                uart_puts("\n");
+            } else {
+                int core_id = str_to_int(core_arg, &parse_success);
+                if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                    uart_puts("Error: core_id must be a number between 0 and ");
+                    uart_put64(NUM_CPUS - 1);
+                    uart_puts("\n");
+                } else {
+                    // Find which core currently has this PD
+                    seL4_Bool found = 0;
+                    for (int c = 0; c < NUM_CPUS; c++) {
+                        if (core_pds[c][pd_id][0] != '\0') {
+                            err = migrate_pd(c, core_id, pd_id);
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        uart_puts("Error: PD ");
+                        uart_put64(pd_id);
+                        uart_puts(" not found on any core\n");
+                    }
                 }
             }
         } else {
             uart_puts("Usage: migrate <pd_id> <core> OR migrate monitor <core>\n");
         }
+
     } else if (str_eq(command, "off")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            err = send_core_command(CORE_OFF, str_to_int(arg), 0);
+            int core_id = str_to_int(arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                err = send_core_command(CORE_OFF, core_id, 0);
+            }
         } else {
             uart_puts("Usage: off <core_id>\n");
         }
+
     } else if (str_eq(command, "powerdown")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            err = send_core_command(CORE_POWERDOWN, str_to_int(arg), 0);
+            int core_id = str_to_int(arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                err = send_core_command(CORE_POWERDOWN, core_id, 0);
+            }
         } else {
             uart_puts("Usage: powerdown <core_id>\n");
         }
+
     } else if (str_eq(command, "standby")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            err = send_core_command(CORE_STANDBY, str_to_int(arg), 0);
+            int core_id = str_to_int(arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                err = send_core_command(CORE_STANDBY, core_id, 0);
+            }
         } else {
             uart_puts("Usage: standby <core_id>\n");
         }
+
     } else if (str_eq(command, "on")) {
         char *arg = next_token(&cmd);
         if (arg) {
-            err = send_core_command(CORE_ON, str_to_int(arg), 0);
+            int core_id = str_to_int(arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                err = send_core_command(CORE_ON, core_id, 0);
+            }
         } else {
             uart_puts("Usage: on <core_id>\n");
         }
+
     } else {
         uart_puts("Unknown command. Type 'help' for a list of commands.\n");
     }
@@ -158,7 +277,14 @@ static void execute_command(char *cmd) {
     }
 }
 
-// === Core command interface ===
+// ============================================================================
+// Core Command Interface
+// ============================================================================
+
+/**
+ * Send a command to the Core Manager API via protected procedure call.
+ * @return Error status from Core Manager (0 = success, 1 = error)
+ */
 static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id) {
     microkit_mr_set(0, cmd);
     microkit_mr_set(1, core_id);
@@ -168,27 +294,44 @@ static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_
     return microkit_mr_get(0);
 }
 
+/**
+ * Migrate a PD from one core to another.
+ * Updates internal tracking and sends migration command to Core Manager.
+ */
 static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id) {
+    // Update tracking arrays
     memcpy(core_pds[to_core][pd_id], core_pds[from_core][pd_id], MICROKIT_PD_NAME_LENGTH);
     core_pds[from_core][pd_id][0] = '\0';
+    
+    // Send migration command
     return send_core_command(CORE_MIGRATE, to_core, pd_id);
 }
 
-// === Dump helper ===
+// ============================================================================
+// Display Helpers
+// ============================================================================
+
+/**
+ * Display all PDs currently running on a specific core.
+ */
 static void dump_core(uint8_t core) {
     if (core >= NUM_CPUS) {
-        uart_puts("Invalid core ID.\n");
+        uart_puts("Error: Invalid core ID\n");
         return;
     }
 
-    uart_puts("=== Dumping Protection Domains for Core ");
+    uart_puts("=== Core ");
     uart_put64(core);
-    uart_puts(" ===\nPD ID\tName\n----------------------\n");
+    uart_puts(" Protection Domains ===\n");
+    uart_puts("PD ID\tName\n");
+    uart_puts("----------------------\n");
 
+    // Show Monitor if it's on this core
     if (core == monitor_core) {
-        uart_puts("\tMicrokit Monitor\n");
+        uart_puts("N/A\tMicrokit Monitor\n");
     }
 
+    // Show all other PDs
     for (int pd_id = 0; pd_id < MAX_PDS; pd_id++) {
         char *name = core_pds[core][pd_id];
         if (name[0] != '\0') {
@@ -199,26 +342,35 @@ static void dump_core(uint8_t core) {
         }
     }
 
-    uart_puts("=== End Dump ===\n");
+    uart_puts("=== End ===\n");
 }
 
-// === Command help ===
+/**
+ * Print help message with all available commands.
+ */
 static void print_help(void) {
     uart_puts(
         "\n=== CORE MANAGEMENT COMMANDS ===\n"
-        "help                     : Show this help message\n"
-        "status <core_id>         : View the status of a core\n"
-        "dump <core_id>           : Dump the protection domains on a core\n"
-        "migrate <pd_id> <core>   : Migrate a protection domain to a core\n"
-        "migrate monitor <core>   : Migrate the monitor to a specific core\n"
-        "off <core_id>            : Turn off a core\n"
-        "powerdown <core_id>      : Power down a core\n"
-        "standby <core_id>        : Put a core in standby mode\n"
-        "on <core_id>             : Turn on a core\n\n"
+        "help                     - Show this help message\n"
+        "status <core_id>         - View the status of a core\n"
+        "dump <core_id>           - Dump the protection domains on a core\n"
+        "migrate <pd_id> <core>   - Migrate a protection domain to a core\n"
+        "migrate monitor <core>   - Migrate the monitor to a specific core\n"
+        "off <core_id>            - Turn off a core\n"
+        "powerdown <core_id>      - Power down a core\n"
+        "standby <core_id>        - Put a core in standby mode\n"
+        "on <core_id>             - Turn on a core\n\n"
     );
 }
 
-// === String helpers ===
+// ============================================================================
+// String Utilities
+// ============================================================================
+
+/**
+ * Compare two strings for equality.
+ * @return 1 if equal, 0 otherwise
+ */
 static int str_eq(const char *a, const char *b) {
     while (*a && *b && *a == *b) {
         a++;
@@ -227,6 +379,10 @@ static int str_eq(const char *a, const char *b) {
     return (*a == '\0' && *b == '\0');
 }
 
+/**
+ * Skip whitespace characters in a string.
+ * @return Pointer to first non-whitespace character
+ */
 static char *skip_ws(char *p) {
     while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
         p++;
@@ -234,6 +390,12 @@ static char *skip_ws(char *p) {
     return p;
 }
 
+/**
+ * Extract the next token from a string.
+ * Modifies the input string by null-terminating the token.
+ * @param p Pointer to string pointer (updated to point after the token)
+ * @return Pointer to token, or NULL if no token found
+ */
 static char *next_token(char **p) {
     char *start = skip_ws(*p);
     if (*start == '\0') {
@@ -254,22 +416,44 @@ static char *next_token(char **p) {
     return start;
 }
 
-static int str_to_int(const char *s) {
-    int val = 0;
-    int is_negative = 0;
-
-    if (*s == '-') {
-        is_negative = 1;
-        s++;
+/**
+ * Convert a string to a positive integer.
+ * @param s String to convert
+ * @param success Output parameter indicating if conversion succeeded
+ * @return Converted integer value (0 if conversion failed)
+ */
+static int str_to_int(const char *s, seL4_Bool *success) {
+    if (!s || *s == '\0') {
+        *success = 0;
+        return 0;
     }
 
+    // Reject negative numbers
+    if (*s == '-') {
+        *success = 0;
+        return 0;
+    }
+
+    // Check that we have at least one digit
+    if (*s < '0' || *s > '9') {
+        *success = 0;
+        return 0;
+    }
+
+    int val = 0;
+
+    // Convert digits
     while (*s >= '0' && *s <= '9') {
         val = val * 10 + (*s - '0');
         s++;
     }
 
-    if (is_negative) {
-        return -val;
+    // Check for trailing non-numeric characters
+    if (*s != '\0') {
+        *success = 0;
+        return 0;
     }
+
+    *success = 1;
     return val;
 }

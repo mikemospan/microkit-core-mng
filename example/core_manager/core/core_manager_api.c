@@ -78,7 +78,7 @@ static uint32_t psci_version(void);
 // ============================================================================
 
 /**
- * Initialize the core manager.
+ * Initialise the core manager.
  * - Copies bootstrap code to memory region accessible by secondary cores
  * - Flushes caches to ensure memory coherency
  * - Sets up timer if the microkit is built in benchmark mode

@@ -3,60 +3,94 @@
 #include "profiler_config.h"
 #include "profiler.h"
 
+// ============================================================================
+// Constants
+// ============================================================================
+
 #define CORE_MANAGER_CHANNEL    1
 
-#define ISB asm volatile("isb")
-#define MRS(reg, v)  asm volatile("mrs %x0," reg : "=r"(v))
-#define MSR(reg, v)                                     \
-    do {                                                \
-        uint64_t _v = v;                                \
-        asm volatile("msr " reg ",%x0" ::  "r" (_v));   \
-    } while(0)
+// ============================================================================
+// ARM Assembly Macros
+// ============================================================================
 
-// Function prototypes
+#define ISB              asm volatile("isb")
+#define MRS(reg, v)      asm volatile("mrs %x0," reg : "=r"(v))
+#define MSR(reg, v)      do {                                        \
+                             uint64_t _v = v;                        \
+                             asm volatile("msr " reg ",%x0" :: "r"(_v)); \
+                         } while(0)
+
+// ============================================================================
+// Global Variables
+// ============================================================================
+
+// Shared instruction memory from Core Manager
+Instruction *instruction_vaddr;
+
+// ============================================================================
+// Function Prototypes
+// ============================================================================
+
+// Core power management
 static void core_off(void);
 static void core_suspend(seL4_Bool power_down);
 static void handle_instruction(Instruction instr);
 
+// PMU (Performance Monitoring Unit) management
 static void setup_pmu(void);
 static void init_pmu(void);
 static void halt_pmu(void);
 static void resume_pmu(void);
-static void configure_clkcnt(uint64_t val);
+static void reset_cycle_counter(void);
 
-// Pointer to instruction received from Core Manager
-Instruction *instruction_vaddr;
+// ============================================================================
+// Microkit API Implementation
+// ============================================================================
 
-// === Microkit API functions ===
+/**
+ * Initialise the core worker.
+ * Sets up the PMU for cycle counting if benchmarking is enabled.
+ */
 void init(void) {
 #if CONFIG_BENCHMARK
     setup_pmu();
 #endif
 }
 
+/**
+ * Handle notifications from the Core Manager.
+ * Processes power management commands or timer interrupts for benchmarking.
+ */
 void notified(microkit_channel ch) {
-    if (ch == CORE_MANAGER_CHANNEL) {
-        handle_instruction(*instruction_vaddr);
-    } else {
+    if (ch != CORE_MANAGER_CHANNEL) {
         uart_puts("[Core Worker]: Received unexpected notification: ");
         uart_put64(ch);
         uart_puts("\n");
+        return;
     }
-    
+
+    handle_instruction(*instruction_vaddr);
     microkit_irq_ack(ch);
 }
 
 #if PRINTING
+/**
+ * Handle protected procedure calls from the Core Manager.
+ * Used for synchronous cycle counter reporting when printing is enabled.
+ */
 microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     if (ch == CORE_MANAGER_CHANNEL) {
+        // Read and print cycle counter
         uint64_t cycles;
         MRS(PMU_CYCLE_CTR, cycles);
         uart_puts("[Core Worker]: Cycles since last tick: ");
         uart_put64(cycles);
         uart_puts("\n");
-        MSR(PMU_CYCLE_CTR, 0);
+        
+        // Reset counter for next measurement period
+        reset_cycle_counter();
     } else {
-        uart_puts("[Core Worker]: Received unexpected notification: ");
+        uart_puts("[Core Worker]: Received unexpected PPC from channel: ");
         uart_put64(ch);
         uart_puts("\n");
     }
@@ -65,33 +99,55 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
 }
 #endif
 
+// ============================================================================
+// Instruction Handling
+// ============================================================================
+
+/**
+ * Execute the instruction received from the Core Manager.
+ * Handles core power management commands and timer-based benchmarking.
+ */
 static void handle_instruction(Instruction instr) {
     switch (instr) {
         case CORE_OFF:
             uart_puts("[Core Worker]: Turning off core.\n");
             core_off();
             break;
+
         case CORE_POWERDOWN:
             uart_puts("[Core Worker]: Powering down core.\n");
-            core_suspend(1); // Power down flag set
+            core_suspend(1);  // Power down mode
             break;
+
         case CORE_STANDBY:
             uart_puts("[Core Worker]: Putting core in standby mode.\n");
-            core_suspend(0); // Standby, no power down
+            core_suspend(0);  // Standby mode (retain state)
             break;
+
         default:
-            // The core manager api must be forwarding a timer IRQ to us
+            /*
+             * Default case handles timer interrupts from Core Manager.
+             * Read cycle counter, print utilisation data, then reset.
+             */
             uint64_t cycles;
             MRS(PMU_CYCLE_CTR, cycles);
             uart_puts("[Core Worker]: Cycles since last tick: ");
             uart_put64(cycles);
             uart_puts("\n");
-            MSR(PMU_CYCLE_CTR, 0);
+            
+            reset_cycle_counter();
             break;
     }
 }
 
-// Power off the core via PSCI call
+// ============================================================================
+// Core Power Management (PSCI Interface)
+// ============================================================================
+
+/**
+ * Power off this core via PSCI.
+ * This is a non-returning call - the core will be powered down.
+ */
 static void core_off(void) {
     seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_OFF};
     seL4_ARM_SMCContext response;
@@ -100,64 +156,99 @@ static void core_off(void) {
     print_error(response);
 }
 
-// Suspend the core (standby or power down) via PSCI call
+/**
+ * Suspend this core via PSCI.
+ * @param power_down If true, power down the core; if false, enter standby mode
+ * 
+ * In standby mode, the core retains state and can resume quickly.
+ * In power down mode, the core loses state and resumes via bootstrap_entry.
+ */
 static void core_suspend(seL4_Bool power_down) {
-    // x1 encodes the power state: bit 16 = power down flag
-    seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_SUSPEND, .x1 = power_down << 16, .x2 = bootstrap_entry};
+    /*
+     * PSCI power state encoding (x1):
+     *  Bit 16: StateType (0=Standby, 1=Powerdown)
+     *  x2: Entry point address for resume (used in powerdown mode)
+     */
+    seL4_ARM_SMCContext args = {
+        .x0 = PSCI_CPU_SUSPEND,
+        .x1 = power_down << 16,
+        .x2 = bootstrap_entry
+    };
     seL4_ARM_SMCContext response;
 
     microkit_arm_smc_call(&args, &response);
     print_error(response);
 }
 
-/* Set up the PMU for cycle counting */
+// ============================================================================
+// Performance Monitoring Unit (PMU) Management
+// ============================================================================
+
+/**
+ * Set up the PMU for cycle counting.
+ * Initialises and enables the cycle counter for performance measurements.
+ */
 static void setup_pmu(void) {
-    halt_pmu();
-    init_pmu();
-    MSR(PMU_CYCLE_CTR, 0);
-    resume_pmu();
+    halt_pmu();              // Disable PMU
+    init_pmu();              // Configure PMU settings
+    reset_cycle_counter();   // Clear cycle counter
+    resume_pmu();            // Enable PMU
 }
 
-/* Halt the PMU */
+/**
+ * Halt the PMU by disabling the cycle counter.
+ * This stops cycle counting on this core.
+ */
 static void halt_pmu(void) {
-    uint32_t value = 0;
-    uint32_t mask = 0;
+    uint32_t value;
 
-    /* Disable Performance Counter */
+    // Disable the performance counter (PMCR_EL0.E = 0)
     MRS(PMCR_EL0, value);
-    mask = 0;
-    mask |= (1 << 0);
-    MSR(PMCR_EL0, (value & ~mask));
+    value &= ~(1 << 0);
+    MSR(PMCR_EL0, value);
 
-    /* Disable cycle counter register */
+    // Disable the cycle counter (PMCNTENSET_EL0.C = 0)
     MRS(PMCNTENSET_EL0, value);
-    mask = 0;
-    mask |= (1 << 31);
-    MSR(PMCNTENSET_EL0, (value & ~mask));
+    value &= ~(1 << 31);
+    MSR(PMCNTENSET_EL0, value);
+    
     ISB;
 }
 
+/**
+ * Initialise PMU configuration.
+ * Enables cycle counting in EL2 (hypervisor mode).
+ */
 static void init_pmu(void) {
     uint32_t value;
+    
+    // Configure cycle counter filter (PMCCFILTR_EL0)
     MRS(PMCCFILTR_EL0, value);
-    // Set the NSH Bit. Enables counting in EL2.
-    value |= (1 << 27);
+    value |= (1 << 27);  // Set NSH bit to enable counting in EL2
     MSR(PMCCFILTR_EL0, value);
 }
 
-/* Configure cycle counter*/
-static void configure_clkcnt(uint64_t val) {
-    uint64_t init_cnt = 0xffffffffffffffff - val;
-    MSR(PMU_CYCLE_CTR, init_cnt);
+/**
+ * Reset the cycle counter to zero.
+ */
+static void reset_cycle_counter(void) {
+    MSR(PMU_CYCLE_CTR, 0);
 }
 
-/* Resume the PMU */
+/**
+ * Resume the PMU by enabling the cycle counter.
+ * Starts counting CPU cycles on this core.
+ */
 static void resume_pmu(void) {
-    uint64_t val;
-    MRS(PMCR_EL0, val);
-    val |= BIT(0);
+    uint64_t value;
+
+    // Enable the performance counter (PMCR_EL0.E = 1)
+    MRS(PMCR_EL0, value);
+    value |= (1 << 0);
     ISB;
-    MSR(PMCR_EL0, val);
-    MSR(PMCNTENSET_EL0, (BIT(31)));
+    MSR(PMCR_EL0, value);
+
+    // Enable the cycle counter (PMCNTENSET_EL0.C = 1)
+    MSR(PMCNTENSET_EL0, (1 << 31));
     ISB;
 }

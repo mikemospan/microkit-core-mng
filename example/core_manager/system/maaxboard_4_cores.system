@@ -13,6 +13,7 @@
         <map mr="worker_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="instruction_vaddr"/>
         <map mr="gpt" vaddr="0x3000000" perms="rw" cached="false" setvar_vaddr="gpt_base_vaddr"/>
         <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
+        <irq irq="87" id="6" /> <!-- Timer interrupt -->
 
         <protection_domain name="core_worker0" priority="254" cpu="0" smc="true" id="1">
             <program_image path="core_worker.elf"/>
