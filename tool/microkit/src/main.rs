@@ -2306,7 +2306,7 @@ fn build_system(
         }
 
         // Mint access to the child interrupt handlers in the CSpace of the Core Manager API PD
-        for (_, pd) in system.protection_domains.iter().enumerate() {
+        for (_, pd) in system.protection_domains.iter().enumerate().skip(1) {
             for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
                 let cap_idx = BASE_IRQ_CAP + sysirq.id;
                 assert!(cap_idx < PD_CAP_SIZE);

@@ -81,6 +81,7 @@
 #define PMCR_EL0 "pmcr_el0"
 #define PMCNTENSET_EL0 "pmcntenset_el0"
 #define PMOVSCLR_EL0 "pmovsclr_el0"
+#define PMCCFILTR_EL0 "pmccfiltr_el0"
 
 /* Different profiler states */
 enum profiler_states {
