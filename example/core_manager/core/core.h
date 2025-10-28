@@ -29,13 +29,15 @@ typedef enum {
     CORE_STANDBY,
     CORE_MIGRATE,
     CORE_MIGRATE_MONITOR,
-    CORE_STATUS
+    CORE_STATUS,
+    CORES_QUERY,
+    CORES_RESTART_PMU
 } Instruction;
 
 /* Physical entry point for bootstrapping code. */
 uintptr_t bootstrap_entry;
 
-static int print_error(seL4_ARM_SMCContext response) {
+static seL4_Error print_error(seL4_ARM_SMCContext response) {
     switch (response.x0) {
     case PSCI_E_NOT_SUPPORTED:
         microkit_dbg_puts("Your request is not supported.\n");

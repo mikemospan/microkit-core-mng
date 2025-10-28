@@ -220,3 +220,23 @@ static void uart_puthex64(uint64_t num) {
     }
 #endif
 }
+
+static void uart_putfloat(uint64_t numerator, uint64_t denominator, int decimal_places) {
+#if PRINTING
+    // Print integer part
+    uint64_t integer_part = numerator / denominator;
+    uart_put64(integer_part);
+    
+    // Print decimal point
+    uart_putc('.');
+    
+    // Print decimal part
+    uint64_t remainder = numerator % denominator;
+    for (int i = 0; i < decimal_places; i++) {
+        remainder *= 10;
+        uint64_t digit = remainder / denominator;
+        uart_putc('0' + digit);
+        remainder = remainder % denominator;
+    }
+#endif
+}

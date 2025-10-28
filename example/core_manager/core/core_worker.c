@@ -73,31 +73,29 @@ void notified(microkit_channel ch) {
     microkit_irq_ack(ch);
 }
 
-#if PRINTING
 /**
  * Handle protected procedure calls from the Core Manager.
- * Used for synchronous cycle counter reporting when printing is enabled.
+ * Used for synchronous cycle counter reporting.
  */
 microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
-    if (ch == CORE_MANAGER_CHANNEL) {
-        // Read and print cycle counter
-        uint64_t cycles;
-        MRS(PMU_CYCLE_CTR, cycles);
-        uart_puts("[Core Worker]: Cycles since last tick: ");
-        uart_put64(cycles);
-        uart_puts("\n");
-        
-        // Reset counter for next measurement period
-        reset_cycle_counter();
-    } else {
+    if (ch != CORE_MANAGER_CHANNEL) {
         uart_puts("[Core Worker]: Received unexpected PPC from channel: ");
         uart_put64(ch);
         uart_puts("\n");
+
+        microkit_mr_set(0, -1); // error
+    } else {
+        // Read cycle counter
+        uint64_t cycles;
+        MRS(PMU_CYCLE_CTR, cycles);
+        microkit_mr_set(0, cycles);
+        
+        // Reset counter for next measurement period
+        reset_cycle_counter();
     }
 
-    return microkit_msginfo_new(0, 0);
+    return microkit_msginfo_new(0, 1);
 }
-#endif
 
 // ============================================================================
 // Instruction Handling
@@ -110,32 +108,19 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
 static void handle_instruction(Instruction instr) {
     switch (instr) {
         case CORE_OFF:
-            uart_puts("[Core Worker]: Turning off core.\n");
             core_off();
             break;
 
         case CORE_POWERDOWN:
-            uart_puts("[Core Worker]: Powering down core.\n");
             core_suspend(1);  // Power down mode
             break;
 
         case CORE_STANDBY:
-            uart_puts("[Core Worker]: Putting core in standby mode.\n");
             core_suspend(0);  // Standby mode (retain state)
             break;
 
         default:
-            /*
-             * Default case handles timer interrupts from Core Manager.
-             * Read cycle counter, print utilisation data, then reset.
-             */
-            uint64_t cycles;
-            MRS(PMU_CYCLE_CTR, cycles);
-            uart_puts("[Core Worker]: Cycles since last tick: ");
-            uart_put64(cycles);
-            uart_puts("\n");
-            
-            reset_cycle_counter();
+            uart_puts("[Core Worker]: Received unexpected instruction.\n");
             break;
     }
 }

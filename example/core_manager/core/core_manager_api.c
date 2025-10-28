@@ -11,24 +11,6 @@
 #define BASE_SCHED_CONTROL_CAP  458
 #define MAX_IRQS                64
 
-// Timer configuration
-#define TIMER_IRQ_CHANNEL       6
-#define GPT_FREQ                12u  // 12 MHz peripheral clock
-
-// GPT register offsets (indexed as uint32_t array)
-#define GPT_CR                  0    // Control Register
-#define GPT_PR                  1    // Prescaler Register
-#define GPT_SR                  2    // Status Register
-#define GPT_IR                  3    // Interrupt Register
-#define GPT_OCR1                4    // Output Compare Register 1
-#define GPT_OCR2                5    // Output Compare Register 2
-#define GPT_OCR3                6    // Output Compare Register 3
-#define GPT_ICR1                7    // Input Capture Register 1
-#define GPT_ICR2                8    // Input Capture Register 2
-#define GPT_CNT                 9    // Counter Register
-
-#define GPT_STATUS_REG_CLEAR    0x3F // Clear all status bits
-
 // ============================================================================
 // External Symbols
 // ============================================================================
@@ -55,23 +37,18 @@ uint64_t pd_period[MAX_PDS];  // Scheduling periods (in microseconds)
 uint8_t monitor_core = 0;     // Core currently running the Monitor PD
 uint8_t cores_on = NUM_CPUS;  // Number of cores currently powered on
 
-// Memory-mapped GPT registers
-volatile uint32_t *gpt_base_vaddr;
-
 // ============================================================================
 // Function Prototypes
 // ============================================================================
 
-// Timer handling
-static void setup_timer(void);
-static void handle_timer_irq(void);
-
 // Core operations
-static inline void core_migrate(uint8_t pd, uint8_t core);
+static inline seL4_Error core_migrate(uint8_t pd, uint8_t core);
 static inline void monitor_migrate(uint8_t core);
 static void core_on(uint8_t core, seL4_Word cpu_bootstrap);
-static seL4_Word core_status(uint8_t core, seL4_Bool print);
+static seL4_Word core_status(uint8_t core);
 static uint32_t psci_version(void);
+static microkit_msginfo cores_query(void);
+static void cores_restart_pmu(void);
 
 // ============================================================================
 // Microkit API Implementation
@@ -81,7 +58,6 @@ static uint32_t psci_version(void);
  * Initialise the core manager.
  * - Copies bootstrap code to memory region accessible by secondary cores
  * - Flushes caches to ensure memory coherency
- * - Sets up timer if the microkit is built in benchmark mode
  */
 void init(void) {
     // Copy bootstrap code to shared memory region
@@ -104,10 +80,6 @@ void init(void) {
     // Memory barrier to ensure cache operations complete
     asm volatile("dsb ish");
 
-#if CONFIG_BENCHMARK
-    setup_timer();
-#endif
-
 #if PRINTING
     // Print PSCI version information
     uint32_t ver = psci_version();
@@ -127,13 +99,6 @@ void init(void) {
  * Currently only handles timer interrupts for PMU updating.
  */
 void notified(microkit_channel ch) {
-#if CONFIG_BENCHMARK
-    if (ch == TIMER_IRQ_CHANNEL) {
-        handle_timer_irq();
-        microkit_irq_ack(ch);
-        return;
-    }
-#endif
     uart_puts("[Core Manager]: Received unexpected notification.\n");
 }
 
@@ -151,7 +116,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     instruction_vaddr[0] = microkit_mr_get(0);
     uint8_t core = microkit_mr_get(1);
     uint8_t pd = microkit_mr_get(2);
-    int err = 0;
+    seL4_Word ret = 0;
 
     switch (instruction_vaddr[0]) {
         case CORE_ON:
@@ -166,20 +131,22 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
             // Validate that we can power down this core
             if (cores_on == 1) {
                 uart_puts("Cannot power down: only 1 core remains.\n");
-                err = 1;
+                ret = 1;
                 break;
             } else if (core == monitor_core) {
                 uart_puts("Cannot power down core containing the Monitor.\n");
-                err = 1;
+                ret = 1;
                 break;
             }
             // Notify the core to shut down
+            if (core_status(core) == 0) {
+                cores_on--;
+            }
             microkit_notify(core + 2);
-            cores_on--;
             break;
 
         case CORE_MIGRATE:
-            core_migrate(pd, core);
+            ret = core_migrate(pd, core);
             break;
 
         case CORE_MIGRATE_MONITOR:
@@ -189,17 +156,23 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
             break;
 
         case CORE_STATUS:
-            // Query and print the power state of the specified core
-            core_status(core, 1);
+            // Query the power state of the specified core
+            ret = core_status(core);
+            break;
+
+        case CORES_QUERY:
+            return cores_query();
+
+        case CORES_RESTART_PMU:
+            cores_restart_pmu();
             break;
 
         default:
-            err = 1;
+            ret = 1;
             break;
     }
 
-    // Return error status to caller
-    microkit_mr_set(0, err);
+    microkit_mr_set(0, ret);
     return microkit_msginfo_new(0, 1);
 }
 
@@ -232,76 +205,6 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
 }
 
 // ============================================================================
-// Timer Management
-// ============================================================================
-
-/**
- * Handle timer interrupt.
- * Notifies all core worker PDs to collect performance statistics.
- */
-static void handle_timer_irq(void) {
-    uint32_t sr = gpt_base_vaddr[GPT_SR];
-    gpt_base_vaddr[GPT_SR] = sr;  // Clear interrupt status bits
-
-    if (sr & (1 << 0)) {  // Compare1 interrupt fired
-#if PRINTING
-        /*
-         * Use blocking PPCs when printing is enabled to ensure
-         * synchronous access to UART registers.
-         */
-        microkit_ppcall(2, microkit_msginfo_new(0, 0));
-        microkit_ppcall(3, microkit_msginfo_new(0, 0));
-        microkit_ppcall(4, microkit_msginfo_new(0, 0));
-        microkit_ppcall(5, microkit_msginfo_new(0, 0));
-#else
-        /*
-         * Use non-blocking notifications when printing is disabled.
-         * Set instruction to 0 so core workers enter default case.
-         */
-        instruction_vaddr[0] = 0;
-        microkit_notify(2);
-        microkit_notify(3);
-        microkit_notify(4);
-        microkit_notify(5);
-#endif
-    }
-}
-
-/**
- * Configure and start the GPT timer for 1-second periodic interrupts.
- */
-static void setup_timer(void) {
-    // Disable GPT and clear any pending interrupts
-    gpt_base_vaddr[GPT_CR] = 0;
-    gpt_base_vaddr[GPT_SR] = GPT_STATUS_REG_CLEAR;
-
-    // Perform software reset
-    gpt_base_vaddr[GPT_CR] = (1 << 15);
-    while (gpt_base_vaddr[GPT_CR] & (1 << 15));  // Wait for reset to complete
-
-    // Configure prescaler (no division)
-    gpt_base_vaddr[GPT_PR] = 0;
-    
-    // Set compare value for 1-second period at 12 MHz
-    gpt_base_vaddr[GPT_OCR1] = 1 * 1000 * 1000 * GPT_FREQ;
-
-    /*
-     * Configure Control Register:
-     *  [15] SWR    = 0 (software reset complete)
-     *  [9]  FRR    = 0 (restart mode - auto-reset on compare)
-     *  [6]  CLKSRC = 1 (use peripheral clock)
-     *  [0]  EN     = 1 (enable timer)
-     */
-    gpt_base_vaddr[GPT_CR] =
-        (0 << 9) |  // Restart mode
-        (1 << 6) |  // Peripheral clock source
-        (1 << 0);   // Enable
-
-    // Enable only Compare1 interrupt
-    gpt_base_vaddr[GPT_IR] = (1 << 0);
-}
-
-// ============================================================================
 // Core Operations (PSCI Interface)
 // ============================================================================
 
@@ -326,8 +229,13 @@ static void core_on(uint8_t core, seL4_Word cpu_bootstrap) {
  * Migrate a PD's scheduling context and IRQs to a different core.
  * @param pd Protection domain to migrate
  * @param core Target core number
+ * @return Success of failure. This function cannot migrate core worker PDs.
  */
-static inline void core_migrate(uint8_t pd, uint8_t core) {
+static inline seL4_Error core_migrate(uint8_t pd, uint8_t core) {
+    if (pd >= 1 && pd <= NUM_CPUS) {
+        return 1;
+    }
+
     seL4_SchedControl_ConfigureFlags(
         BASE_SCHED_CONTROL_CAP + core,  // Target core's scheduling control
         BASE_SCHED_CONTEXT_CAP + pd,    // PD's scheduling context
@@ -343,6 +251,8 @@ static inline void core_migrate(uint8_t pd, uint8_t core) {
             seL4_IRQHandler_SetCore(BASE_IRQ_CAP + i, core);
         }
     }
+
+    return 0;
 }
 
 /**
@@ -365,10 +275,9 @@ static inline void monitor_migrate(uint8_t core) {
 /**
  * Query the power state of a core using PSCI.
  * @param core Core number to query
- * @param print Whether to print the status
  * @return Core status (0=ON, 1=OFF, 2=PENDING)
  */
-static seL4_Word core_status(uint8_t core, seL4_Bool print) {
+static seL4_Word core_status(uint8_t core) {
     seL4_ARM_SMCContext args = {
         .x0 = PSCI_AFFINITY_INFO,
         .x1 = core
@@ -376,17 +285,7 @@ static seL4_Word core_status(uint8_t core, seL4_Bool print) {
     seL4_ARM_SMCContext response;
     
     microkit_arm_smc_call(&args, &response);
-
-    int err = print_error(response);
-    if (!err && print) {
-        const char *status_str = (response.x0 == 0) ? "ON" :
-                                 (response.x0 == 1) ? "OFF" : "PENDING";
-        uart_puts("Core ");
-        uart_put64(core);
-        uart_puts(" is ");
-        uart_puts(status_str);
-        uart_puts("\n");
-    }
+    print_error(response);
 
     return response.x0;
 }
@@ -403,4 +302,32 @@ static uint32_t psci_version(void) {
     print_error(response);
 
     return response.x0;
+}
+
+/**
+ * Query the core workers for the cycle counts on each core.
+ * @return The message info after setting each message register to
+ * a corresponding core's cycle count.
+ */
+static microkit_msginfo cores_query(void) {
+    uint64_t core_cycles[NUM_CPUS];
+    for (uint8_t i = 0; i < NUM_CPUS; i++) {
+        microkit_ppcall(i + 2, microkit_msginfo_new(0, 0));
+        core_cycles[i] = microkit_mr_get(0);
+    }
+
+    for (uint8_t i = 0; i < NUM_CPUS; i++) {
+        microkit_mr_set(i, core_cycles[i]);
+    }
+
+    return microkit_msginfo_new(0, NUM_CPUS);
+}
+
+/**
+ * Query the core workers to restart the cycle counts on each core.
+ */
+static void cores_restart_pmu(void) {
+    for (uint8_t i = 0; i < NUM_CPUS; i++) {
+        microkit_ppcall(i + 2, microkit_msginfo_new(0, 0));
+    }
 }

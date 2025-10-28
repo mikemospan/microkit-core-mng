@@ -5,8 +5,9 @@
 // Constants
 // ============================================================================
 
-#define API_CHANNEL 1
-#define DELETE      127
+#define API_CHANNEL     1
+#define TIMER_CHANNEL   3
+#define DELETE          127
 
 // ============================================================================
 // Global Variables
@@ -22,6 +23,12 @@ int cmd_len = 0;
 // Current core running the Monitor PD
 uint8_t monitor_core = 0;
 
+// Start in manual mode (no timer interrupts)
+seL4_Bool auto_mode = 0;
+
+// Track which cores should be powered down on next tick
+static seL4_Bool cores_to_powerdown[NUM_CPUS] = {0};
+
 // ============================================================================
 // Function Prototypes
 // ============================================================================
@@ -33,8 +40,9 @@ static char *next_token(char **p);
 static int str_to_int(const char *s, seL4_Bool *success);
 
 // Core management
-static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id);
+static seL4_Word send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id);
 static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id);
+static inline seL4_Bool migrate_monitor(uint8_t to_core);
 static void dump_core(uint8_t core);
 
 // Command handling
@@ -48,7 +56,7 @@ static void print_help(void);
 
 /**
  * Initialise the core manager.
- * Sets up UART and clears the command buffer.
+ * - Sets up UART and clears the command buffer.
  */
 void init(void) {
     uart_init();
@@ -56,27 +64,131 @@ void init(void) {
     cmd_len = 0;
 }
 
-/**
- * Handle UART interrupts for user input.
- * Reads characters from UART and processes commands.
- */
-void notified(microkit_channel ch) {
-    if (ch != UART_IRQ_CH) {
-        uart_puts("[Monitor]: Received unexpected notification: ");
-        uart_put64(ch);
-        uart_puts("\n");
-        return;
+static int find_most_suitable_core(int exclude_core, uint64_t *utils) {
+    int best_core = -1;
+    uint64_t best_util = 0;
+
+    for (int core_id = 0; core_id < NUM_CPUS; core_id++) {
+        if (core_id == exclude_core)
+            continue;
+
+        // Skip if this core is off or pending
+        seL4_Word status = send_core_command(CORE_STATUS, core_id, 0);
+        if (status != 0 || cores_to_powerdown[core_id]) {
+            continue;
+        }
+
+        // Pick the most utilised core under 90%
+        if (utils[core_id] > best_util && utils[core_id] < 900000000ULL) {
+            best_core = core_id;
+            best_util = utils[core_id];
+        }
     }
 
-    // Handle platform-specific IRQ acknowledgment
-    uart_handle_irq();
+    return best_core;
+}
 
-    // Read character and echo it back
-    char input = uart_getc();
-    uart_puts(&input);
-    handle_user_input(input);
+/**
+ * Handle UART interrupts for user input, and timer interrupts if auto is enabled.
+ */
+void notified(microkit_channel ch) {
+    if (ch == UART_IRQ_CH) {
+        // Handle platform-specific IRQ acknowledgment
+        uart_handle_irq();
 
-    microkit_irq_ack(ch);
+        // Read character and echo it back
+        char input = uart_getc();
+        uart_puts(&input);
+        handle_user_input(input);
+
+        microkit_irq_ack(ch);
+    }
+#if CONFIG_BENCHMARK
+    else if (ch == TIMER_CHANNEL) {
+        uart_puts("=== TICK ===\n");
+        // --- Perform deferred power downs ---
+        for (int i = 0; i < NUM_CPUS; i++) {
+            if (cores_to_powerdown[i] && i == 1) {
+                uart_puts("Powering down core ");
+                uart_put64(i);
+                uart_puts(".\n");
+
+                send_core_command(CORE_OFF, i, 0);
+                cores_to_powerdown[i] = 0;
+            }
+        }
+        uart_puts("Successfully powered down deferred cores\n");
+
+        microkit_mr_set(0, CORES_QUERY);
+        microkit_ppcall(API_CHANNEL, microkit_msginfo_new(0, 1));
+        uart_puts("Returned\n");
+
+        // Read utilisation and store locally
+        uint64_t utils[NUM_CPUS];
+        for (int i = 0; i < NUM_CPUS; i++) {
+            utils[i] = microkit_mr_get(i);
+            uart_puts("[Core Manager]: Core ");
+            uart_put64(i);
+            uart_puts(" utilisation: ");
+            uart_putfloat(utils[i] * 100, 1000000000, 2);
+            uart_puts("%\n");
+        }
+
+        // --- Automatic migration logic ---
+        const uint64_t THRESHOLD = 100000000; // 10% of 1 second scaled to 1e9 cycles
+        for (int i = 0; i < NUM_CPUS; i++) {
+            if (utils[i] < THRESHOLD && i != 1) {
+                uart_puts("[Core Manager]: Core ");
+                uart_put64(i);
+                uart_puts(" under 10%, migrating PDs...\n");
+
+                int to_core = -1;
+                for (int pd_id = 0; pd_id < MAX_PDS; pd_id++) {
+                    if (core_pds[i][pd_id][0] == '\0') continue;
+
+                    to_core = find_most_suitable_core(i, utils);
+                    if (to_core < 0) {
+                        uart_puts("No suitable target core for migration.\n");
+                        break;
+                    }
+
+                    seL4_Bool err = migrate_pd(i, to_core, pd_id);
+                    if (!err) {
+                        uart_puts("Migrated PD ");
+                        uart_put64(pd_id);
+                        uart_puts(" to core ");
+                        uart_put64(to_core);
+                        uart_puts("\n");
+                    } else {
+                        uart_puts("Migration failed for PD ");
+                        uart_put64(pd_id);
+                        uart_puts("\n");
+                    }
+                }
+
+                if (to_core >= 0 && i == monitor_core) {
+                    migrate_monitor(to_core);
+                    uart_puts("Migrated Monitor to core ");
+                    uart_put64(to_core);
+                    uart_puts("\n");
+                }
+
+                // Defer CORE_OFF until next tick
+                if (to_core >= 0) {
+                    cores_to_powerdown[i] = 1;
+                    uart_puts("[Core Manager]: Will power down core ");
+                    uart_put64(i);
+                    uart_puts(" on next tick\n");
+                }
+            }
+        }
+    }
+#endif
+    else {
+        uart_puts("[Core Manager]: Received unexpected notification: ");
+        uart_put64(ch);
+        uart_puts("\n");
+    }
 }
 
 // ============================================================================
@@ -121,12 +233,19 @@ static void execute_command(char *cmd) {
         return;
     }
 
-    seL4_Bool err = 0;
+    seL4_Word err = 0;
     seL4_Bool parse_success;
 
     if (str_eq(command, "help")) {
         print_help();
-
+    } else if (str_eq(command, "auto")) {
+        microkit_mr_set(0, 1);
+        microkit_ppcall(TIMER_CHANNEL, microkit_msginfo_new(0, 1));
+        auto_mode = 1;
+    } else if (str_eq(command, "manual")) {
+        microkit_mr_set(0, 0);
+        microkit_ppcall(TIMER_CHANNEL, microkit_msginfo_new(0, 1));
+        auto_mode = 0;
     } else if (str_eq(command, "status")) {
         char *arg = next_token(&cmd);
         if (arg) {
@@ -136,12 +255,18 @@ static void execute_command(char *cmd) {
                 uart_put64(NUM_CPUS - 1);
                 uart_puts("\n");
             } else {
-                err = send_core_command(CORE_STATUS, core_id, 0);
+                seL4_Word status = send_core_command(CORE_STATUS, core_id, 0);
+                const char *status_str = (status == 0) ? "ON" :
+                                 (status == 1) ? "OFF" : "PENDING";
+                uart_puts("Core ");
+                uart_put64(core_id);
+                uart_puts(" is ");
+                uart_puts(status_str);
+                uart_puts("\n");
             }
         } else {
             uart_puts("Usage: status <core_id>\n");
         }
-
     } else if (str_eq(command, "dump")) {
         char *arg = next_token(&cmd);
         if (arg) {
@@ -156,7 +281,6 @@ static void execute_command(char *cmd) {
         } else {
             uart_puts("Usage: dump <core_id>\n");
         }
-
     } else if (str_eq(command, "migrate")) {
         char *pd_arg = next_token(&cmd);
         char *core_arg = next_token(&cmd);
@@ -169,10 +293,7 @@ static void execute_command(char *cmd) {
                 uart_put64(NUM_CPUS - 1);
                 uart_puts("\n");
             } else {
-                err = send_core_command(CORE_MIGRATE_MONITOR, core_id, 0);
-                if (!err) {
-                    monitor_core = core_id;
-                }
+                err = migrate_monitor(core_id);
             }
         } else if (pd_arg && core_arg) {
             // Migrate a regular PD
@@ -207,7 +328,6 @@ static void execute_command(char *cmd) {
         } else {
             uart_puts("Usage: migrate <pd_id> <core> OR migrate monitor <core>\n");
         }
-
     } else if (str_eq(command, "off")) {
         char *arg = next_token(&cmd);
         if (arg) {
@@ -222,7 +342,6 @@ static void execute_command(char *cmd) {
         } else {
             uart_puts("Usage: off <core_id>\n");
         }
-
     } else if (str_eq(command, "powerdown")) {
         char *arg = next_token(&cmd);
         if (arg) {
@@ -237,7 +356,6 @@ static void execute_command(char *cmd) {
         } else {
             uart_puts("Usage: powerdown <core_id>\n");
         }
-
     } else if (str_eq(command, "standby")) {
         char *arg = next_token(&cmd);
         if (arg) {
@@ -252,7 +370,6 @@ static void execute_command(char *cmd) {
         } else {
             uart_puts("Usage: standby <core_id>\n");
         }
-
     } else if (str_eq(command, "on")) {
         char *arg = next_token(&cmd);
         if (arg) {
@@ -267,7 +384,6 @@ static void execute_command(char *cmd) {
         } else {
             uart_puts("Usage: on <core_id>\n");
         }
-
     } else {
         uart_puts("Unknown command. Type 'help' for a list of commands.\n");
     }
@@ -283,9 +399,9 @@ static void execute_command(char *cmd) {
 
 /**
  * Send a command to the Core Manager API via protected procedure call.
- * @return Error status from Core Manager (0 = success, 1 = error)
+ * @return Response from Core Manager API, usually success or failure.
  */
-static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id) {
+static seL4_Word send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_id) {
     microkit_mr_set(0, cmd);
     microkit_mr_set(1, core_id);
     microkit_mr_set(2, pd_id);
@@ -299,12 +415,30 @@ static seL4_Bool send_core_command(Instruction cmd, uint8_t core_id, uint8_t pd_
  * Updates internal tracking and sends migration command to Core Manager.
  */
 static inline seL4_Bool migrate_pd(uint8_t from_core, uint8_t to_core, uint8_t pd_id) {
-    // Update tracking arrays
-    memcpy(core_pds[to_core][pd_id], core_pds[from_core][pd_id], MICROKIT_PD_NAME_LENGTH);
-    core_pds[from_core][pd_id][0] = '\0';
+    seL4_Bool err = 1;
+    if (core_pds[from_core][pd_id][0] != '\0') {
+        err = send_core_command(CORE_MIGRATE, to_core, pd_id);
+    }
+
+    if (!err) {
+        // Update tracking arrays
+        memcpy(core_pds[to_core][pd_id], core_pds[from_core][pd_id], MICROKIT_PD_NAME_LENGTH);
+        core_pds[from_core][pd_id][0] = '\0';
+    }
     
-    // Send migration command
-    return send_core_command(CORE_MIGRATE, to_core, pd_id);
+    return err;
+}
+
+/**
+ * Migrate a PD from one core to another.
+ * Updates internal tracking and sends migration command to Core Manager.
+ */
+static inline seL4_Bool migrate_monitor(uint8_t to_core) {
+    seL4_Bool err = send_core_command(CORE_MIGRATE_MONITOR, to_core, 0);
+    if (!err) {
+        monitor_core = to_core;
+    }
+    return err;
 }
 
 // ============================================================================
@@ -352,6 +486,8 @@ static void print_help(void) {
     uart_puts(
         "\n=== CORE MANAGEMENT COMMANDS ===\n"
         "help                     - Show this help message\n"
+        "auto                     - Enable automatic mode (start timer interrupts)\n"
+        "manual                   - Enable manual mode (stop timer interrupts)\n\n"
         "status <core_id>         - View the status of a core\n"
         "dump <core_id>           - Dump the protection domains on a core\n"
         "migrate <pd_id> <core>   - Migrate a protection domain to a core\n"
@@ -359,7 +495,7 @@ static void print_help(void) {
         "off <core_id>            - Turn off a core\n"
         "powerdown <core_id>      - Power down a core\n"
         "standby <core_id>        - Put a core in standby mode\n"
-        "on <core_id>             - Turn on a core\n\n"
+        "on <core_id>             - Turn on a core\n"
     );
 }
 

@@ -13,7 +13,7 @@ BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
 CORE_DIR := core
 PROFILER_DIR := profiler
 BOOTSTRAP_DIR := bootstrap
-IMAGES := core_manager.elf core_manager_api.elf core_worker.elf
+IMAGES := core_manager.elf core_manager_api.elf core_worker.elf timer.elf
 LDFLAGS := -L$(BOARD_DIR)/lib -T $(BOOTSTRAP_DIR)/bootstrap.ld
 CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror \
           -I. -I$(BOARD_DIR)/include -I$(CORE_DIR) -I$(PROFILER_DIR) \
@@ -92,6 +92,9 @@ $(BUILD_DIR)/core_worker.o: $(CORE_DIR)/core_worker.c Makefile
 $(BUILD_DIR)/core_manager.o: $(CORE_DIR)/core_manager.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
+$(BUILD_DIR)/timer.o: $(CORE_DIR)/timer.c Makefile
+	$(CC) -c $(CFLAGS) $< -o $@
+
 # Link core_manager_api.elf including bootstrap object files
 $(BUILD_DIR)/core_manager_api.elf: $(addprefix $(BUILD_DIR)/, core_manager_api.o $(BOOTSTRAP_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
@@ -102,6 +105,10 @@ $(BUILD_DIR)/core_worker.elf: $(addprefix $(BUILD_DIR)/, core_worker.o)
 
 # Link core_manager.elf
 $(BUILD_DIR)/core_manager.elf: $(addprefix $(BUILD_DIR)/, core_manager.o)
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
+
+# Link timer.elf
+$(BUILD_DIR)/timer.elf: $(BUILD_DIR)/timer.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 # Generate image and report
