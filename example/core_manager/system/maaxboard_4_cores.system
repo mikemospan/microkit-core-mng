@@ -44,7 +44,7 @@
             <irq irq="58" id="2"/> <!-- UART interrupt -->
         </protection_domain>
 
-        <protection_domain name="timer" priority="252" id="6">
+        <protection_domain name="timer_driver" priority="252" id="6">
             <program_image path="timer.elf"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <map mr="gpt" vaddr="0x3000000" perms="rw" cached="false" setvar_vaddr="gpt_base_vaddr"/>
@@ -59,7 +59,7 @@
 
     <channel>
         <end pd="core_manager" id="3" pp="true"/>
-        <end pd="timer" id="1"/>
+        <end pd="timer_driver" id="1"/>
     </channel>
 
     <channel>
@@ -83,7 +83,7 @@
     </channel>
         
     <channel>
-        <end pd="timer" id="2" pp="true"/>
+        <end pd="timer_driver" id="2" pp="true"/>
         <end pd="core_manager_api" id="6"/>
     </channel>
 </system>

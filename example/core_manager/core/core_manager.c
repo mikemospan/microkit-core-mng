@@ -26,8 +26,8 @@ uint8_t monitor_core = 0;
 // Start in manual mode (no timer interrupts)
 seL4_Bool auto_mode = 0;
 
-// Track which cores should be powered down on next tick
-static seL4_Bool cores_to_powerdown[NUM_CPUS] = {0};
+// Counter to track number of cores on
+uint8_t cores_on = NUM_CPUS;
 
 // ============================================================================
 // Function Prototypes
@@ -69,12 +69,13 @@ static int find_most_suitable_core(int exclude_core, uint64_t *utils) {
     uint64_t best_util = 0;
 
     for (int core_id = 0; core_id < NUM_CPUS; core_id++) {
-        if (core_id == exclude_core)
+        if (core_id == exclude_core) {
             continue;
+        }
 
         // Skip if this core is off or pending
         seL4_Word status = send_core_command(CORE_STATUS, core_id, 0);
-        if (status != 0 || cores_to_powerdown[core_id]) {
+        if (status != 0) {
             continue;
         }
 
@@ -98,87 +99,56 @@ void notified(microkit_channel ch) {
 
         // Read character and echo it back
         char input = uart_getc();
-        uart_puts(&input);
+        if (input == '\n') {
+            uart_puts("\n");
+        } else {
+            uart_putc(input);
+        }
         handle_user_input(input);
 
         microkit_irq_ack(ch);
     }
 #if CONFIG_BENCHMARK
     else if (ch == TIMER_CHANNEL) {
-        uart_puts("=== TICK ===\n");
-        // --- Perform deferred power downs ---
-        for (int i = 0; i < NUM_CPUS; i++) {
-            if (cores_to_powerdown[i] && i == 1) {
-                uart_puts("Powering down core ");
-                uart_put64(i);
-                uart_puts(".\n");
-
-                send_core_command(CORE_OFF, i, 0);
-                cores_to_powerdown[i] = 0;
-            }
-        }
-        uart_puts("Successfully powered down deferred cores\n");
-
         microkit_mr_set(0, CORES_QUERY);
         microkit_ppcall(API_CHANNEL, microkit_msginfo_new(0, 1));
-        uart_puts("Returned\n");
 
         // Read utilisation and store locally
         uint64_t utils[NUM_CPUS];
         for (int i = 0; i < NUM_CPUS; i++) {
             utils[i] = microkit_mr_get(i);
-            uart_puts("[Core Manager]: Core ");
-            uart_put64(i);
-            uart_puts(" utilisation: ");
-            uart_putfloat(utils[i] * 100, 1000000000, 2);
-            uart_puts("%\n");
         }
 
         // --- Automatic migration logic ---
         const uint64_t THRESHOLD = 100000000; // 10% of 1 second scaled to 1e9 cycles
         for (int i = 0; i < NUM_CPUS; i++) {
-            if (utils[i] < THRESHOLD && i != 1) {
-                uart_puts("[Core Manager]: Core ");
-                uart_put64(i);
-                uart_puts(" under 10%, migrating PDs...\n");
-
+            seL4_Word status = send_core_command(CORE_STATUS, i, 0);
+            if (utils[i] < THRESHOLD && status == 0 && cores_on > 1) {
                 int to_core = -1;
                 for (int pd_id = 0; pd_id < MAX_PDS; pd_id++) {
                     if (core_pds[i][pd_id][0] == '\0') continue;
 
                     to_core = find_most_suitable_core(i, utils);
                     if (to_core < 0) {
-                        uart_puts("No suitable target core for migration.\n");
                         break;
                     }
 
-                    seL4_Bool err = migrate_pd(i, to_core, pd_id);
-                    if (!err) {
-                        uart_puts("Migrated PD ");
-                        uart_put64(pd_id);
-                        uart_puts(" to core ");
-                        uart_put64(to_core);
-                        uart_puts("\n");
-                    } else {
-                        uart_puts("Migration failed for PD ");
-                        uart_put64(pd_id);
-                        uart_puts("\n");
-                    }
+                    migrate_pd(i, to_core, pd_id);
                 }
 
                 if (to_core >= 0 && i == monitor_core) {
                     migrate_monitor(to_core);
-                    uart_puts("Migrated Monitor to core ");
-                    uart_put64(to_core);
-                    uart_puts("\n");
                 }
-
-                // Defer CORE_OFF until next tick
+                
                 if (to_core >= 0) {
-                    cores_to_powerdown[i] = 1;
-                    uart_puts("[Core Manager]: Will power down core ");
+                    uart_puts("[Core Manager]: Core ");
                     uart_put64(i);
-                    uart_puts(" on next tick\n");
+                    uart_puts(" at ");
+                    uart_putfloat(utils[i] * 100, 1000000000, 2);
+                    uart_puts("% utilisation, migrated PDs and powered down core.\n");
+
+                    send_core_command(CORE_OFF, i, 0);
+                    cores_on--;
                 }
             }
         }

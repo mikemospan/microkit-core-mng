@@ -82,15 +82,15 @@ void init(void) {
 
 #if PRINTING
     // Print PSCI version information
-    uint32_t ver = psci_version();
-    uint32_t major = (ver >> 16) & 0xFFFF;
-    uint32_t minor = ver & 0xFFFF;
+    // uint32_t ver = psci_version();
+    // uint32_t major = (ver >> 16) & 0xFFFF;
+    // uint32_t minor = ver & 0xFFFF;
 
-    uart_puts("Using PSCI v");
-    uart_put64(major);
-    uart_puts(".");
-    uart_put64(minor);
-    uart_puts(".\n");
+    // uart_puts("Using PSCI v");
+    // uart_put64(major);
+    // uart_puts(".");
+    // uart_put64(minor);
+    // uart_puts(".\n");
 #endif
 }
 
@@ -312,8 +312,12 @@ static uint32_t psci_version(void) {
 static microkit_msginfo cores_query(void) {
     uint64_t core_cycles[NUM_CPUS];
     for (uint8_t i = 0; i < NUM_CPUS; i++) {
-        microkit_ppcall(i + 2, microkit_msginfo_new(0, 0));
-        core_cycles[i] = microkit_mr_get(0);
+        seL4_Word status = core_status(i);
+
+        if (status == 0) {
+            microkit_ppcall(i + 2, microkit_msginfo_new(0, 0));
+            core_cycles[i] = microkit_mr_get(0);
+        }
     }
 
     for (uint8_t i = 0; i < NUM_CPUS; i++) {
