@@ -37,6 +37,9 @@ uint64_t pd_period[MAX_PDS];  // Scheduling periods (in microseconds)
 uint8_t monitor_core = 0;     // Core currently running the Monitor PD
 uint8_t cores_on = NUM_CPUS;  // Number of cores currently powered on
 
+/* Physical entry point for bootstrapping code. */
+uintptr_t bootstrap_entry;
+
 // ============================================================================
 // Function Prototypes
 // ============================================================================

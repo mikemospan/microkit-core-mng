@@ -34,9 +34,6 @@ typedef enum {
     CORES_RESTART_PMU
 } Instruction;
 
-/* Physical entry point for bootstrapping code. */
-uintptr_t bootstrap_entry;
-
 static seL4_Error print_error(seL4_ARM_SMCContext response) {
     switch (response.x0) {
     case PSCI_E_NOT_SUPPORTED:

@@ -17,24 +17,28 @@
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+            <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
 
         <protection_domain name="core_worker1" priority="254" cpu="1" smc="true" id="2">
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+            <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
 
         <protection_domain name="core_worker2" priority="254" cpu="2" smc="true" id="3">
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+            <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
 
         <protection_domain name="core_worker3" priority="254" cpu="3" smc="true" id="4">
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+            <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
 
         <protection_domain name="core_manager" priority="251" id="5">

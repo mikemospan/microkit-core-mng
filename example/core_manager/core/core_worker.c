@@ -27,6 +27,9 @@
 // Shared instruction memory from Core Manager
 Instruction *instruction_vaddr;
 
+/* Physical entry point for bootstrapping code. */
+uintptr_t bootstrap_entry;
+
 // ============================================================================
 // Function Prototypes
 // ============================================================================
@@ -70,7 +73,6 @@ void notified(microkit_channel ch) {
     }
 
     handle_instruction(*instruction_vaddr);
-    microkit_irq_ack(ch);
 }
 
 /**
@@ -149,20 +151,38 @@ static void core_off(void) {
  * In power down mode, the core loses state and resumes via bootstrap_entry.
  */
 static void core_suspend(seL4_Bool power_down) {
+    /* Bit 16 describes power level. See Arm PSCI handbook. */
+    seL4_Word power_state = power_down << 16;
+
+    /*
+     * Platforms may require their own state ID encoding. As far as I can tell,
+     * the only way to get this state ID is by looking at the `validate_power_state`
+     * platform specific implementations in the Arm Trusted Firmware source code.
+     */
+#if defined(CONFIG_PLAT_QEMU_ARM_VIRT)
+    power_state |= (1 << power_down);
+#elif defined(CONFIG_PLAT_MAAXBOARD)
+    power_state |= 0x33;
+#endif
+
     /*
      * PSCI power state encoding (x1):
-     *  Bit 16: StateType (0=Standby, 1=Powerdown)
+     *  x1: Power state encoding
      *  x2: Entry point address for resume (used in powerdown mode)
      */
     seL4_ARM_SMCContext args = {
         .x0 = PSCI_CPU_SUSPEND,
-        .x1 = power_down << 16,
+        .x1 = power_state,
         .x2 = bootstrap_entry
     };
     seL4_ARM_SMCContext response;
 
     microkit_arm_smc_call(&args, &response);
-    print_error(response);
+
+    seL4_Error success = print_error(response);
+    if (success && power_down) {
+        uart_puts("BUG: We don't expect to get to this point...\n");
+    }
 }
 
 // ============================================================================
