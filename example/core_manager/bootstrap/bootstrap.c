@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdatomic.h>
 #include "serial.h"
 
 #define STACK_SIZE 4096
@@ -35,7 +36,7 @@ uintptr_t kernel_entry;
 /* Stack for each CPU core */
 volatile uint8_t cpu_stacks[NUM_CPUS][STACK_SIZE] ALIGN(16);
 /* Cores status */
-uint8_t *bootstrap_cores_status;
+_Atomic uint8_t *bootstrap_cores_status;
 
 /* Get current exception level */
 static inline uint32_t current_el(void) {
@@ -73,8 +74,8 @@ void secondary_cpu_entry(uint64_t cpu_id) {
     el2_mmu_enable();
 
     puts("Setting the core as ON\n");
-    bootstrap_cores_status[1 + cpu_id] = 0;
-    bootstrap_cores_status[0]++;
+    atomic_store(bootstrap_cores_status + 1 + cpu_id, 0);
+    atomic_fetch_add(bootstrap_cores_status, 1);
 
     puts("Starting the seL4 kernel\n");
     START_KERNEL();

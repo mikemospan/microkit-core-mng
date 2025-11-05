@@ -1,3 +1,4 @@
+#include <stdatomic.h>
 #include "core.h"
 #include "uart.h"
 
@@ -35,7 +36,7 @@ uint64_t pd_period[MAX_PDS];  // Scheduling periods (in microseconds)
 
 // Core management state
 uint8_t monitor_core = 0;     // Core currently running the Monitor PD
-uint8_t *cores_status;
+_Atomic uint8_t *cores_status; // Contains the current status of each core
 
 /* Physical entry point for bootstrapping code. */
 uintptr_t bootstrap_entry;
@@ -82,9 +83,9 @@ void init(void) {
     // Memory barrier to ensure cache operations complete
     asm volatile("dsb ish");
 
-    cores_status[0] = NUM_CPUS;
-    for (int i = 1; i < NUM_CPUS; i++) {
-        cores_status[i] = CORE_ON;
+    atomic_store(cores_status, NUM_CPUS);
+    for (int i = 0; i < NUM_CPUS; i++) {
+        atomic_store(cores_status + i + 1, CORE_ON);
     }
 }
 
@@ -122,9 +123,8 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
         case CORE_OFF:
         case CORE_POWERDOWN:
         case CORE_STANDBY:
-            uint8_t *cores_on = &cores_status[0];
             // Validate that we can power down this core
-            if (*cores_on == 1) {
+            if (atomic_load(cores_status) == 1) {
                 uart_puts("Cannot power down: only 1 core remains.\n");
                 ret = 1;
                 break;
@@ -136,7 +136,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
             // Notify the core to shut down
             if (core_status(core) == CORE_ON) {
                 microkit_notify(core + 2);
-                (*cores_on)--;
+                atomic_fetch_sub(cores_status, 1);
             } else {
                 uart_puts("The core you are putting into a lower power state, is not on\n");
                 ret = 1;
@@ -276,7 +276,7 @@ static inline void monitor_migrate(uint8_t core) {
  * @return Core status according to the CoreStatus enum
  */
 static seL4_Word core_status(uint8_t core) {
-    return cores_status[1 + core];
+    return atomic_load(cores_status + 1 + core);
 }
 
 /**

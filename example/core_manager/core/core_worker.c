@@ -1,3 +1,4 @@
+#include <stdatomic.h>
 #include "core.h"
 #include "uart.h"
 #include "profiler_config.h"
@@ -29,7 +30,7 @@ Instruction *instruction_vaddr;
 /* Physical entry point for bootstrapping code. */
 uintptr_t bootstrap_entry;
 /* Status of every core (ON, OFF, POWERDOWN, STANDBY). */
-uint8_t *cores_status;
+_Atomic uint8_t *cores_status;
 /* The core this worker is in charge of. */
 uint8_t core;
 
@@ -141,7 +142,7 @@ static void handle_instruction(Instruction instr) {
 static void core_off(void) {
     seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_OFF};
     seL4_ARM_SMCContext response;
-    cores_status[1 + core] = CORE_OFF;
+    atomic_store(cores_status + 1 + core, CORE_OFF);
 
     microkit_arm_smc_call(&args, &response);
     print_error(response);
@@ -181,7 +182,7 @@ static void core_suspend(seL4_Bool power_down) {
     };
     seL4_ARM_SMCContext response;
 
-    cores_status[1 + core] = power_down ? CORE_POWERDOWN : CORE_STANDBY;
+    atomic_store(cores_status + 1 + core, power_down ? CORE_POWERDOWN : CORE_STANDBY);
 
     uart_puts("Suspending core...\n");
     microkit_arm_smc_call(&args, &response);
@@ -192,7 +193,7 @@ static void core_suspend(seL4_Bool power_down) {
         uart_puts("BUG: We don't expect to get to this point...\n");
     }
 
-    cores_status[1 + core] = CORE_ON;
+    atomic_store(cores_status + 1 + core, CORE_ON);
 }
 
 // ============================================================================
