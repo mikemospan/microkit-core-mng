@@ -24,11 +24,14 @@
 // Global Variables
 // ============================================================================
 
-// Shared instruction memory from Core Manager
+/* Shared instruction memory from Core Manager. */
 Instruction *instruction_vaddr;
-
 /* Physical entry point for bootstrapping code. */
 uintptr_t bootstrap_entry;
+/* Status of every core (ON, OFF, POWERDOWN, STANDBY). */
+uint8_t *cores_status;
+/* The core this worker is in charge of. */
+uint8_t core;
 
 // ============================================================================
 // Function Prototypes
@@ -138,6 +141,7 @@ static void handle_instruction(Instruction instr) {
 static void core_off(void) {
     seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_OFF};
     seL4_ARM_SMCContext response;
+    cores_status[1 + core] = CORE_OFF;
 
     microkit_arm_smc_call(&args, &response);
     print_error(response);
@@ -177,12 +181,18 @@ static void core_suspend(seL4_Bool power_down) {
     };
     seL4_ARM_SMCContext response;
 
+    cores_status[1 + core] = power_down ? CORE_POWERDOWN : CORE_STANDBY;
+
+    uart_puts("Suspending core...\n");
     microkit_arm_smc_call(&args, &response);
+    uart_puts("Core resumed.\n");
 
     seL4_Error success = print_error(response);
     if (success && power_down) {
         uart_puts("BUG: We don't expect to get to this point...\n");
     }
+
+    cores_status[1 + core] = CORE_ON;
 }
 
 // ============================================================================

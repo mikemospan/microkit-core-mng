@@ -35,7 +35,7 @@ uint64_t pd_period[MAX_PDS];  // Scheduling periods (in microseconds)
 
 // Core management state
 uint8_t monitor_core = 0;     // Core currently running the Monitor PD
-uint8_t cores_on = NUM_CPUS;  // Number of cores currently powered on
+uint8_t *cores_status;
 
 /* Physical entry point for bootstrapping code. */
 uintptr_t bootstrap_entry;
@@ -49,7 +49,6 @@ static inline seL4_Error core_migrate(uint8_t pd, uint8_t core);
 static inline void monitor_migrate(uint8_t core);
 static void core_on(uint8_t core, seL4_Word cpu_bootstrap);
 static seL4_Word core_status(uint8_t core);
-static uint32_t psci_version(void);
 static microkit_msginfo cores_query(void);
 static void cores_restart_pmu(void);
 
@@ -83,18 +82,10 @@ void init(void) {
     // Memory barrier to ensure cache operations complete
     asm volatile("dsb ish");
 
-#if PRINTING
-    // Print PSCI version information
-    // uint32_t ver = psci_version();
-    // uint32_t major = (ver >> 16) & 0xFFFF;
-    // uint32_t minor = ver & 0xFFFF;
-
-    // uart_puts("Using PSCI v");
-    // uart_put64(major);
-    // uart_puts(".");
-    // uart_put64(minor);
-    // uart_puts(".\n");
-#endif
+    cores_status[0] = NUM_CPUS;
+    for (int i = 1; i < NUM_CPUS; i++) {
+        cores_status[i] = CORE_ON;
+    }
 }
 
 /**
@@ -131,8 +122,9 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
         case CORE_OFF:
         case CORE_POWERDOWN:
         case CORE_STANDBY:
+            uint8_t *cores_on = &cores_status[0];
             // Validate that we can power down this core
-            if (cores_on == 1) {
+            if (*cores_on == 1) {
                 uart_puts("Cannot power down: only 1 core remains.\n");
                 ret = 1;
                 break;
@@ -142,10 +134,13 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
                 break;
             }
             // Notify the core to shut down
-            if (core_status(core) == 0) {
-                cores_on--;
+            if (core_status(core) == CORE_ON) {
+                microkit_notify(core + 2);
+                (*cores_on)--;
+            } else {
+                uart_puts("The core you are putting into a lower power state, is not on\n");
+                ret = 1;
             }
-            microkit_notify(core + 2);
             break;
 
         case CORE_MIGRATE:
@@ -276,35 +271,12 @@ static inline void monitor_migrate(uint8_t core) {
 }
 
 /**
- * Query the power state of a core using PSCI.
+ * Query the power state of a core.
  * @param core Core number to query
- * @return Core status (0=ON, 1=OFF, 2=PENDING)
+ * @return Core status according to the CoreStatus enum
  */
 static seL4_Word core_status(uint8_t core) {
-    seL4_ARM_SMCContext args = {
-        .x0 = PSCI_AFFINITY_INFO,
-        .x1 = core
-    };
-    seL4_ARM_SMCContext response;
-    
-    microkit_arm_smc_call(&args, &response);
-    print_error(response);
-
-    return response.x0;
-}
-
-/**
- * Query the PSCI version from firmware.
- * @return PSCI version (upper 16 bits = major, lower 16 bits = minor)
- */
-static uint32_t psci_version(void) {
-    seL4_ARM_SMCContext args = {.x0 = PSCI_VERSION_FID};
-    seL4_ARM_SMCContext response;
-    
-    microkit_arm_smc_call(&args, &response);
-    print_error(response);
-
-    return response.x0;
+    return cores_status[1 + core];
 }
 
 /**
@@ -316,8 +288,7 @@ static microkit_msginfo cores_query(void) {
     uint64_t core_cycles[NUM_CPUS];
     for (uint8_t i = 0; i < NUM_CPUS; i++) {
         seL4_Word status = core_status(i);
-
-        if (status == 0) {
+        if (status == CORE_ON) {
             microkit_ppcall(i + 2, microkit_msginfo_new(0, 0));
             core_cycles[i] = microkit_mr_get(0);
         }

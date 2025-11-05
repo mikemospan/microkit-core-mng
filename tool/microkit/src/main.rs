@@ -2348,14 +2348,33 @@ fn build_system(
             pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
         }
 
-        // Write into the first ELF (core manager ELF)
-        let (first, rest) = pd_elf_files.split_at_mut(1);
-        let elf = &mut first[0];
-        let core_manager = &mut rest[4]; // index 4 overall
-        core_manager.write_symbol("core_pds", &core_pds_bytes)?;
-        elf.write_symbol("pd_irqs", &pd_irqs_bytes)?;
-        elf.write_symbol("pd_budget", &pd_budget_bytes)?;
-        elf.write_symbol("pd_period", &pd_period_bytes)?;
+        let pd_irqs_bytes   = pd_irqs_bytes.as_slice();
+        let pd_budget_bytes = pd_budget_bytes.as_slice();
+        let pd_period_bytes = pd_period_bytes.as_slice();
+        let core_pds_bytes  = core_pds_bytes.as_slice();
+
+        for (i, pd) in system.protection_domains.iter().enumerate() {
+            let elf = match pd_elf_files.get_mut(i) {
+                Some(e) => e,
+                None => return Err(format!("Missing ELF for PD {}", i)),
+            };
+
+            match pd.name.as_str() {
+                "core_manager_api" => {
+                    elf.write_symbol("pd_irqs",  pd_irqs_bytes).map_err(|e| format!("write pd_irqs: {e}"))?;
+                    elf.write_symbol("pd_budget", pd_budget_bytes).map_err(|e| format!("write pd_budget: {e}"))?;
+                    elf.write_symbol("pd_period", pd_period_bytes).map_err(|e| format!("write pd_period: {e}"))?;
+                }
+                "core_manager" => {
+                    elf.write_symbol("core_pds", core_pds_bytes).map_err(|e| format!("write core_pds: {e}"))?;
+                }
+                name if name.starts_with("core_worker") => {
+                    let core_le = (pd.cpu as u8).to_le_bytes();
+                    elf.write_symbol("core", &core_le).map_err(|e| format!("write core: {e}"))?;
+                }
+                _ => { /* ignore anything else */ }
+            }
+        }
     }
 
     /* --- END: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */

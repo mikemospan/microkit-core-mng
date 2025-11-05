@@ -73,9 +73,8 @@ static int find_most_suitable_core(int exclude_core, uint64_t *utils) {
             continue;
         }
 
-        // Skip if this core is off or pending
         seL4_Word status = send_core_command(CORE_STATUS, core_id, 0);
-        if (status != 0) {
+        if (status != CORE_ON) {
             continue;
         }
 
@@ -104,9 +103,9 @@ void notified(microkit_channel ch) {
         } else {
             uart_putc(input);
         }
-        handle_user_input(input);
 
         microkit_irq_ack(ch);
+        handle_user_input(input);
     }
 #if CONFIG_BENCHMARK
     else if (ch == TIMER_CHANNEL) {
@@ -226,8 +225,18 @@ static void execute_command(char *cmd) {
                 uart_puts("\n");
             } else {
                 seL4_Word status = send_core_command(CORE_STATUS, core_id, 0);
-                const char *status_str = (status == 0) ? "ON" :
-                                 (status == 1) ? "OFF" : "PENDING";
+                const char *status_str;
+                if (status == CORE_ON) {
+                    status_str = "ON";
+                } else if (status == CORE_OFF) {
+                    status_str = "OFF";
+                } else if (status == CORE_POWERDOWN) {
+                    status_str = "POWERDOWN";
+                } else if (status == CORE_STANDBY) {
+                    status_str = "STANDBY";
+                } else {
+                    status_str = "PENDING";
+                }
                 uart_puts("Core ");
                 uart_put64(core_id);
                 uart_puts(" is ");
