@@ -136,7 +136,6 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
             // Notify the core to shut down
             if (core_status(core) == CORE_ON) {
                 microkit_notify(core + 2);
-                atomic_fetch_sub(cores_status, 1);
             } else {
                 uart_puts("The core you are putting into a lower power state, is not on\n");
                 ret = 1;

@@ -207,7 +207,9 @@ static void execute_command(char *cmd) {
 
     if (str_eq(command, "help")) {
         print_help();
-    } else if (str_eq(command, "auto")) {
+    }
+#if CONFIG_BENCHMARK
+    else if (str_eq(command, "auto")) {
         microkit_mr_set(0, 1);
         microkit_ppcall(TIMER_CHANNEL, microkit_msginfo_new(0, 1));
         auto_mode = 1;
@@ -215,7 +217,9 @@ static void execute_command(char *cmd) {
         microkit_mr_set(0, 0);
         microkit_ppcall(TIMER_CHANNEL, microkit_msginfo_new(0, 1));
         auto_mode = 0;
-    } else if (str_eq(command, "status")) {
+    }
+#endif
+    else if (str_eq(command, "status")) {
         char *arg = next_token(&cmd);
         if (arg) {
             int core_id = str_to_int(arg, &parse_success);

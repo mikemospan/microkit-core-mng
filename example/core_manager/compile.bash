@@ -4,7 +4,7 @@ set -e
 # --- Configuration ---
 EXAMPLE_DIR="example/core_manager"
 BUILD_DIR="build"
-MICROKIT_BOARDS=("qemu_virt_aarch64" "maaxboard_4_cores")
+MICROKIT_BOARDS=("qemu_virt_aarch64" "maaxboard_4_cores" "zcu102_4_cores")
 MICROKIT_SDK="release/microkit-sdk-2.0.1-dev"
 MICROKIT_CONFIG="benchmark"
 NUM_CPUS=4

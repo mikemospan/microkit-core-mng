@@ -140,9 +140,12 @@ static void handle_instruction(Instruction instr) {
  * This is a non-returning call - the core will be powered down.
  */
 static void core_off(void) {
+    /* Mark the core as offline and decrement the number of cores counter. */
+    atomic_store(cores_status + 1 + core, CORE_OFF);
+    atomic_fetch_sub(cores_status, 1);
+
     seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_OFF};
     seL4_ARM_SMCContext response;
-    atomic_store(cores_status + 1 + core, CORE_OFF);
 
     microkit_arm_smc_call(&args, &response);
     print_error(response);
@@ -168,10 +171,16 @@ static void core_suspend(seL4_Bool power_down) {
     power_state |= (1 << power_down);
 #elif defined(CONFIG_PLAT_MAAXBOARD)
     power_state |= 0x33;
+#elif defined(CONFIG_PLAT_ZYNQMP)
+    /* Nothing to do here, state ID is expected to be 0. */
 #endif
 
+    /* Mark the core as offline and decrement the number of cores counter. */
+    atomic_store(cores_status + 1 + core, power_down ? CORE_POWERDOWN : CORE_STANDBY);
+    atomic_fetch_sub(cores_status, 1);
+
     /*
-     * PSCI power state encoding (x1):
+     * PSCI CPU Suspend SMC (x0):
      *  x1: Power state encoding
      *  x2: Entry point address for resume (used in powerdown mode)
      */
@@ -182,8 +191,6 @@ static void core_suspend(seL4_Bool power_down) {
     };
     seL4_ARM_SMCContext response;
 
-    atomic_store(cores_status + 1 + core, power_down ? CORE_POWERDOWN : CORE_STANDBY);
-
     uart_puts("Suspending core...\n");
     microkit_arm_smc_call(&args, &response);
     uart_puts("Core resumed.\n");
@@ -193,7 +200,9 @@ static void core_suspend(seL4_Bool power_down) {
         uart_puts("BUG: We don't expect to get to this point...\n");
     }
 
+    /* Mark the core as online and increment the number of cores counter. */
     atomic_store(cores_status + 1 + core, CORE_ON);
+    atomic_fetch_add(cores_status, 1);
 }
 
 // ============================================================================

@@ -1,20 +1,39 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <system>
+    <!-- Memory region where the bootstrap code resides -->
     <memory_region name="bootstrap_mem" size="0x10_000" phys_addr="0x60_000_000"/>
+    <!--
+        Memory region that contains an array with the status of each core.
+        The first entry contains a counter for the number of cores that are on.
+    -->
+    <memory_region name="cores_status" size="0x1_000" phys_addr="0x60_020_000"/>
+    <!-- Memory region that the core workers use to read instructions from the core manager API -->
+    <memory_region name="worker_buffer" size="0x1_000"/>
+
+    <!--
+        The below memory regions are for demo purposes and not necessary for the core
+        management. These include a uart driver and timer driver to receive input and
+        poll the core management subsystem.
+    -->
     <memory_region name="uart" size="0x1_000" phys_addr="0xff_000_000"/>
     <memory_region name="uart_buffer" size="0x1_000"/>
-    <memory_region name="worker_buffer" size="0x1_000"/>
     
     <protection_domain name="core_manager_api" priority="253" smc="true">
         <program_image path="core_manager_api.elf"/>
-        <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+
         <map mr="bootstrap_mem" vaddr="0x5000000" perms="rwx" setvar_vaddr="bootstrap_vaddr"/>
         <map mr="worker_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="instruction_vaddr"/>
+        <map mr="cores_status" vaddr="0x3000000" perms="rw" setvar_vaddr="cores_status"/>
+
+        <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+
         <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
+        <setvar symbol="bootstrap_cores_status" region_paddr="cores_status"/>
 
         <protection_domain name="core_worker0" priority="254" cpu="0" smc="true" id="1">
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
+            <map mr="cores_status" vaddr="0x3000000" perms="rw" setvar_vaddr="cores_status"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
@@ -22,6 +41,7 @@
         <protection_domain name="core_worker1" priority="254" cpu="1" smc="true" id="2">
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
+            <map mr="cores_status" vaddr="0x3000000" perms="rw" setvar_vaddr="cores_status"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
@@ -29,6 +49,7 @@
         <protection_domain name="core_worker2" priority="254" cpu="2" smc="true" id="3">
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
+            <map mr="cores_status" vaddr="0x3000000" perms="rw" setvar_vaddr="cores_status"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
@@ -36,14 +57,15 @@
         <protection_domain name="core_worker3" priority="254" cpu="3" smc="true" id="4">
             <program_image path="core_worker.elf"/>
             <map mr="worker_buffer" vaddr="0x4000000" perms="r" setvar_vaddr="instruction_vaddr"/>
+            <map mr="cores_status" vaddr="0x3000000" perms="rw" setvar_vaddr="cores_status"/>
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         </protection_domain>
 
         <protection_domain name="core_manager" priority="251" id="5">
             <program_image path="core_manager.elf"/>
-            <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <map mr="uart_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="cmd_buffer"/>
+            <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <irq irq="53" id="2"/> <!-- UART interrupt -->
         </protection_domain>
     </protection_domain>
