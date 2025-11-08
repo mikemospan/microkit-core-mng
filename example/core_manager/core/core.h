@@ -10,6 +10,7 @@
 #define PSCI_CPU_OFF        0x84000002
 #define PSCI_CPU_ON         0xC4000003
 #define PSCI_AFFINITY_INFO  0xC4000004
+#define PSCI_FEATURES       0x8400000A
 
 /* Possible Error Codes */
 #define PSCI_SUCCESS                0

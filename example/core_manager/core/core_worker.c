@@ -16,9 +16,9 @@
 
 #define ISB              asm volatile("isb")
 #define MRS(reg, v)      asm volatile("mrs %x0," reg : "=r"(v))
-#define MSR(reg, v)      do {                                        \
-                             uint64_t _v = v;                        \
-                             asm volatile("msr " reg ",%x0" :: "r"(_v)); \
+#define MSR(reg, v)      do {                                               \
+                             uint64_t _v = v;                               \
+                             asm volatile("msr " reg ",%x0" :: "r"(_v));    \
                          } while(0)
 
 // ============================================================================
@@ -33,12 +33,15 @@ uintptr_t bootstrap_entry;
 _Atomic uint8_t *cores_status;
 /* The core this worker is in charge of. */
 uint8_t core;
+/* Whether the existing PSCI implementation uses and extended power state or not. */
+uint32_t has_ext_power_state;
 
 // ============================================================================
 // Function Prototypes
 // ============================================================================
 
 // Core power management
+static uint32_t psci_has_ext_power_state(void);
 static void core_off(void);
 static void core_suspend(seL4_Bool power_down);
 static void handle_instruction(Instruction instr);
@@ -56,9 +59,11 @@ static void reset_cycle_counter(void);
 
 /**
  * Initialise the core worker.
- * Sets up the PMU for cycle counting if benchmarking is enabled.
+ * - Checks the power state format supported by PSCI.
+ * - Sets up the PMU for cycle counting if benchmarking is enabled.
  */
 void init(void) {
+    has_ext_power_state = psci_has_ext_power_state();
 #if CONFIG_BENCHMARK
     setup_pmu();
 #endif
@@ -136,6 +141,21 @@ static void handle_instruction(Instruction instr) {
 // ============================================================================
 
 /**
+ * Query PSCI to determine whether to use original or extended power state format.
+ */
+static uint32_t psci_has_ext_power_state(void) {
+    seL4_ARM_SMCContext args = {.x0 = PSCI_FEATURES, .x1 = PSCI_CPU_SUSPEND};
+    seL4_ARM_SMCContext response;
+
+    microkit_arm_smc_call(&args, &response);
+
+    if (response.x0 == PSCI_E_NOT_SUPPORTED) {
+        return 0; // Original power state format
+    }
+    return response.x0 & BIT(1);
+}
+
+/**
  * Power off this core via PSCI.
  * This is a non-returning call - the core will be powered down.
  */
@@ -159,8 +179,12 @@ static void core_off(void) {
  * In power down mode, the core loses state and resumes via bootstrap_entry.
  */
 static void core_suspend(seL4_Bool power_down) {
-    /* Bit 16 describes power level. See Arm PSCI handbook. */
-    seL4_Word power_state = power_down << 16;
+    /*
+     * If using the extended power state, bit 30 describes the power level.
+     * Otherwise, the original format is used where bit 16 describes the power level.
+     * See Arm PSCI handbook for details.
+     */
+    seL4_Word power_state = power_down << (has_ext_power_state ? 30 : 16);
 
     /*
      * Platforms may require their own state ID encoding. As far as I can tell,
