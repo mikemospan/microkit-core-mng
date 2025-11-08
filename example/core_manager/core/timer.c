@@ -1,77 +1,163 @@
 #include "core.h"
 #include "uart.h"
-
-// ============================================================================
-// Constants
-// ============================================================================
+#include <stdint.h>
 
 #define MANAGER_CHANNEL         1
 #define API_CHANNEL             2
-
-// Timer configuration
 #define TIMER_IRQ_CHANNEL       6
-#define GPT_FREQ                12u  // 12 MHz peripheral clock
 
-// GPT register offsets (indexed as uint32_t array)
-#define GPT_CR                  0    // Control Register
-#define GPT_PR                  1    // Prescaler Register
-#define GPT_SR                  2    // Status Register
-#define GPT_IR                  3    // Interrupt Register
-#define GPT_OCR1                4    // Output Compare Register 1
-#define GPT_OCR2                5    // Output Compare Register 2
-#define GPT_OCR3                6    // Output Compare Register 3
-#define GPT_ICR1                7    // Input Capture Register 1
-#define GPT_ICR2                8    // Input Capture Register 2
-#define GPT_CNT                 9    // Counter Register
-
-#define GPT_STATUS_REG_CLEAR    0x3F // Clear all status bits
-
-// ============================================================================
-// Global Variables
-// ============================================================================
-
-// Memory-mapped GPT registers
+#if defined(CONFIG_PLAT_MAAXBOARD)
 volatile uint32_t *gpt_base_vaddr;
 
-// ============================================================================
-// Function Prototypes
-// ============================================================================
+/* Peripheral base/regs from i.MX8MM RM (GPT block) */
+#define GPT_CR                  0u  /* Control Register */
+#define GPT_PR                  1u  /* Prescaler Register */
+#define GPT_SR                  2u  /* Status Register (W1C bits) */
+#define GPT_IR                  3u  /* Interrupt Register (mask bits) */
+#define GPT_OCR1                4u
+#define GPT_OCR2                5u
+#define GPT_OCR3                6u
+#define GPT_ICR1                7u
+#define GPT_ICR2                8u
+#define GPT_CNT                 9u
 
-// Timer handling
-static void setup_timer(void);
-static void handle_timer_irq(void);
-static void enable_timer_interrupts(void);
-static void disable_timer_interrupts(void);
+#define GPT_STATUS_REG_CLEAR    0x3Fu
 
-// ============================================================================
-// Microkit API Implementation
-// ============================================================================
+/* Your board’s clocking fed GPT with 12 MHz in your existing setup. */
+#define GPT_FREQ_MHZ            12u
 
-/**
- * Initialise the timer.
- */
-void init(void) {
-    setup_timer();
+static void plat_timer_setup(void)
+{
+    /* Disable & clear */
+    gpt_base_vaddr[GPT_CR] = 0;
+    gpt_base_vaddr[GPT_SR] = GPT_STATUS_REG_CLEAR;
+
+    /* Software reset */
+    gpt_base_vaddr[GPT_CR] = (1u << 15);
+    while (gpt_base_vaddr[GPT_CR] & (1u << 15)) { }
+
+    /* No prescale; 1 Hz via OCR1 */
+    gpt_base_vaddr[GPT_PR] = 0;
+    gpt_base_vaddr[GPT_OCR1] = 1000u * 1000u * GPT_FREQ_MHZ;
+
+    /* Peripheral clock, restart mode off, don’t enable yet */
+    gpt_base_vaddr[GPT_CR] = (0u << 9) | (1u << 6);
+
+    /* Mask interrupts for now */
+    gpt_base_vaddr[GPT_IR] = 0;
 }
 
-/**
- * Handle UART interrupts for user input, and timer interrupts if auto is enabled.
- */
+static void plat_timer_enable_irq(void)
+{
+    /* Ensure clocks/domain are up like on your i.MX flow */
+    microkit_mr_set(0, CORES_RESTART_PMU);
+    microkit_ppcall(API_CHANNEL, microkit_msginfo_new(0, 1));
+
+    gpt_base_vaddr[GPT_IR] = (1u << 0);      /* Compare1 */
+    gpt_base_vaddr[GPT_CR] |= (1u << 0);     /* Enable GPT */
+}
+
+static void plat_timer_disable_irq(void)
+{
+    gpt_base_vaddr[GPT_IR] = 0;
+    gpt_base_vaddr[GPT_CR] &= ~(1u << 0);    /* Disable GPT */
+}
+
+static void plat_timer_ack_irq(void)
+{
+    /* W1C – write back the bits we read to clear */
+    uint32_t sr = gpt_base_vaddr[GPT_SR];
+    gpt_base_vaddr[GPT_SR] = sr;
+}
+
+#elif defined(CONFIG_PLAT_ZYNQMP)
+volatile uint8_t *ttc_base_vaddr;
+
+/* TTC register offsets (UG1087: TTC Module) */
+#define TTC_CLK_CTRL_1          0x00
+#define TTC_CNT_CTRL_1          0x0C
+#define TTC_CNT_VAL_1           0x18
+#define TTC_INTERVAL_1          0x24
+#define TTC_INT_STATUS_1        0x54  /* clear-on-read */
+#define TTC_INT_ENABLE_1        0x60
+#define TTC_EVENT_CTRL_1        0x6C  /* (unused) */
+
+#define CNTCTRL_INTERVAL_MODE   (1u << 1)
+#define CNTCTRL_DISABLE         (1u << 0)
+#define CNTCTRL_RESET           (1u << 4)
+
+#define TTC_IRQ_INTERVAL        (1u << 0)
+
+/* Nominal PS low-power domain bus clock ~100 MHz for TTC blocks */
+#define TTC_CLK_HZ              100000000u
+
+static inline void ttc_w(uint32_t off, uint32_t v) {
+    *(volatile uint32_t *)(ttc_base_vaddr + off) = v;
+}
+static inline uint32_t ttc_r(uint32_t off) {
+    return *(volatile uint32_t *)(ttc_base_vaddr + off);
+}
+
+static void plat_timer_setup(void) {
+    /* Stop counter, clear pending */
+    ttc_w(TTC_CNT_CTRL_1, CNTCTRL_DISABLE);
+    (void)ttc_r(TTC_INT_STATUS_1); /* read-to-clear */
+
+    /* No prescale; 1 Hz via interval register */
+    ttc_w(TTC_CLK_CTRL_1, 0);
+    ttc_w(TTC_INTERVAL_1, TTC_CLK_HZ);
+
+    /* Interval mode, disabled for now */
+    ttc_w(TTC_CNT_CTRL_1, CNTCTRL_INTERVAL_MODE | CNTCTRL_DISABLE);
+
+    /* Keep interrupts masked */
+    ttc_w(TTC_INT_ENABLE_1, 0);
+}
+
+static void plat_timer_enable_irq(void) {
+    /* Match your existing pattern: ensure clocks/power domain are up */
+    microkit_mr_set(0, CORES_RESTART_PMU);
+    microkit_ppcall(API_CHANNEL, microkit_msginfo_new(0, 1));
+
+    ttc_w(TTC_INT_ENABLE_1, TTC_IRQ_INTERVAL);
+    /* Reset then enable (DIS=0) in interval mode */
+    ttc_w(TTC_CNT_CTRL_1, CNTCTRL_INTERVAL_MODE | CNTCTRL_RESET);
+}
+
+static void plat_timer_disable_irq(void) {
+    ttc_w(TTC_INT_ENABLE_1, 0);
+    ttc_w(TTC_CNT_CTRL_1, CNTCTRL_INTERVAL_MODE | CNTCTRL_DISABLE);
+}
+
+static void plat_timer_ack_irq(void) {
+    /* clear-on-read */
+    (void)ttc_r(TTC_INT_STATUS_1);
+}
+
+#else
+#error "Select CONFIG_PLAT_MAAXBOARD or CONFIG_PLAT_ZYNQMP"
+#endif
+
+void init(void) {
+    plat_timer_setup();
+}
+
 void notified(microkit_channel ch) {
     if (ch != TIMER_IRQ_CHANNEL) {
-        uart_puts("[Timer Driver]: Received unexpected notification: ");
+        uart_puts("[Timer Driver]: Unexpected notification: ");
         uart_put64(ch);
         uart_puts("\n");
         return;
     }
 
-    handle_timer_irq();
+    plat_timer_ack_irq();
+    microkit_notify(MANAGER_CHANNEL);
     microkit_irq_ack(ch);
 }
 
 microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     if (ch != MANAGER_CHANNEL) {
-        uart_puts("[Timer Driver]: Received unexpected PPC: ");
+        uart_puts("[Timer Driver]: Unexpected PPC: ");
         uart_put64(ch);
         uart_puts("\n");
         return microkit_msginfo_new(0, 0);
@@ -79,66 +165,11 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
 
     seL4_Bool enable = microkit_mr_get(0);
     if (enable) {
-        enable_timer_interrupts();
+        plat_timer_enable_irq();
+        uart_puts("[Timer Driver]: Automatic mode enabled (1 Hz)\n");
     } else {
-        disable_timer_interrupts();
+        plat_timer_disable_irq();
+        uart_puts("[Timer Driver]: Manual mode enabled (no timer IRQs)\n");
     }
-    
     return microkit_msginfo_new(0, 0);
-}
-
-
-// ============================================================================
-// Timer Management
-// ============================================================================
-
-/**
- * Clear the status bits and notify the core manager.
- */
-static void handle_timer_irq(void) {
-    uint32_t sr = gpt_base_vaddr[GPT_SR];
-    gpt_base_vaddr[GPT_SR] = sr;
-    microkit_notify(MANAGER_CHANNEL);
-}
-
-/**
- * Configure and start the GPT timer for 1-second periodic interrupts.
- */
-static void setup_timer(void) {
-    // Disable GPT and clear pending interrupts
-    gpt_base_vaddr[GPT_CR] = 0;
-    gpt_base_vaddr[GPT_SR] = GPT_STATUS_REG_CLEAR;
-
-    // Software reset
-    gpt_base_vaddr[GPT_CR] = (1 << 15);
-    while (gpt_base_vaddr[GPT_CR] & (1 << 15));
-
-    // No prescaler
-    gpt_base_vaddr[GPT_PR] = 0;
-
-    // 1-second compare interval
-    gpt_base_vaddr[GPT_OCR1] = 1 * 1000 * 1000 * GPT_FREQ;
-
-    // Peripheral clock, restart mode (but don't enable yet)
-    gpt_base_vaddr[GPT_CR] =
-        (0 << 9) |  // Restart mode
-        (1 << 6);   // Peripheral clock source only
-
-    // Don't enable interrupts yet — manual mode by default
-    gpt_base_vaddr[GPT_IR] = 0;
-}
-
-static void enable_timer_interrupts(void) {
-    microkit_mr_set(0, CORES_RESTART_PMU);
-    microkit_ppcall(API_CHANNEL, microkit_msginfo_new(0, 1));
-    
-    gpt_base_vaddr[GPT_IR] = (1 << 0);  // Enable Compare1 interrupt
-    gpt_base_vaddr[GPT_CR] |= (1 << 0); // Enable GPT
-    uart_puts("[Timer Driver]: Automatic mode enabled (timer interrupts active)\n");
-}
-
-static void disable_timer_interrupts(void) {
-    gpt_base_vaddr[GPT_IR] = 0;         // Disable interrupts
-    gpt_base_vaddr[GPT_CR] &= ~(1 << 0); // Stop GPT
-    uart_puts("[Timer Driver]: Manual mode enabled (no timer interrupts)\n");
 }

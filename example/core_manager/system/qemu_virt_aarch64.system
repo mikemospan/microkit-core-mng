@@ -12,8 +12,7 @@
 
     <!--
         The below memory regions are for demo purposes and not necessary for the core
-        management. These include a uart driver and timer driver to receive input and
-        poll the core management subsystem.
+        management. In QEMU this only includes a uart driver driver to receive input.
     -->
     <memory_region name="uart" size="0x1_000" phys_addr="0x9_000_000"/>
     <memory_region name="uart_buffer" size="0x1_000"/>
@@ -21,10 +20,10 @@
     <protection_domain name="core_manager_api" priority="253" smc="true">
         <program_image path="core_manager_api.elf"/>
 
-        <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
         <map mr="bootstrap_mem" vaddr="0x5000000" perms="rwx" setvar_vaddr="bootstrap_vaddr"/>
         <map mr="worker_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="instruction_vaddr"/>
         <map mr="cores_status" vaddr="0x3000000" perms="rw" setvar_vaddr="cores_status"/>
+        <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
 
         <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
         <setvar symbol="bootstrap_cores_status" region_paddr="cores_status"/>

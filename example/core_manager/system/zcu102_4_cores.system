@@ -17,6 +17,7 @@
     -->
     <memory_region name="uart" size="0x1_000" phys_addr="0xff_000_000"/>
     <memory_region name="uart_buffer" size="0x1_000"/>
+    <memory_region name="ttc0" size="0x1_000" phys_addr="0xFF11_0000"/>
     
     <protection_domain name="core_manager_api" priority="253" smc="true">
         <program_image path="core_manager_api.elf"/>
@@ -24,7 +25,6 @@
         <map mr="bootstrap_mem" vaddr="0x5000000" perms="rwx" setvar_vaddr="bootstrap_vaddr"/>
         <map mr="worker_buffer" vaddr="0x4000000" perms="rw" setvar_vaddr="instruction_vaddr"/>
         <map mr="cores_status" vaddr="0x3000000" perms="rw" setvar_vaddr="cores_status"/>
-
         <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
 
         <setvar symbol="bootstrap_entry" region_paddr="bootstrap_mem"/>
@@ -68,30 +68,47 @@
             <map mr="uart" vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
             <irq irq="53" id="2"/> <!-- UART interrupt -->
         </protection_domain>
+
+        <protection_domain name="timer_driver" priority="252" id="6">
+            <program_image path="timer.elf"/>
+            <map mr="ttc0"  vaddr="0x3000000" perms="rw" cached="false" setvar_vaddr="ttc_base_vaddr"/>
+            <map mr="uart"  vaddr="0x2000000" perms="rw" cached="false" setvar_vaddr="uart_base_vaddr"/>
+            <irq irq="68" id="6"/> <!-- Timer interrupt -->
+        </protection_domain>
     </protection_domain>
-
-    <channel>
-        <end pd="core_worker0" id="1"/>
-        <end pd="core_manager_api" id="2"/>
-    </channel>
-    
-    <channel>
-        <end pd="core_worker1" id="1"/>
-        <end pd="core_manager_api" id="3"/>
-    </channel>
-
-    <channel>
-        <end pd="core_worker2" id="1"/>
-        <end pd="core_manager_api" id="4"/>
-    </channel>
-
-    <channel>
-        <end pd="core_worker3" id="1"/>
-        <end pd="core_manager_api" id="5"/>
-    </channel>
 
     <channel>
         <end pd="core_manager" id="1" pp="true"/>
         <end pd="core_manager_api" id="1"/>
+    </channel>
+
+    <channel>
+        <end pd="core_manager" id="3" pp="true"/>
+        <end pd="timer_driver" id="1"/>
+    </channel>
+
+    <channel>
+        <end pd="core_worker0" id="1"/>
+        <end pd="core_manager_api" id="2" pp="true"/>
+    </channel>
+    
+    <channel>
+        <end pd="core_worker1" id="1"/>
+        <end pd="core_manager_api" id="3" pp="true"/>
+    </channel>
+
+    <channel>
+        <end pd="core_worker2" id="1"/>
+        <end pd="core_manager_api" id="4" pp="true"/>
+    </channel>
+
+    <channel>
+        <end pd="core_worker3" id="1"/>
+        <end pd="core_manager_api" id="5" pp="true"/>
+    </channel>
+
+    <channel>
+        <end pd="timer_driver" id="2" pp="true"/>
+        <end pd="core_manager_api" id="6"/>
     </channel>
 </system>
