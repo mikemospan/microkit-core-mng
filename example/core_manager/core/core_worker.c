@@ -195,8 +195,8 @@ static void core_suspend(seL4_Bool power_down) {
     microkit_arm_smc_call(&args, &response);
     uart_puts("Core resumed.\n");
 
-    seL4_Error success = print_error(response);
-    if (success && power_down) {
+    seL4_Error err = print_error(response);
+    if (!err && power_down) {
         uart_puts("BUG: We don't expect to get to this point...\n");
     }
 
