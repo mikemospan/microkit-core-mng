@@ -31,6 +31,7 @@ typedef enum {
     CORE_MIGRATE,
     CORE_MIGRATE_MONITOR,
     CORE_STATUS,
+    CORE_RESTART_PDS,
     CORES_QUERY,
     CORES_RESTART_PMU
 } Instruction;

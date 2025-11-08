@@ -33,7 +33,10 @@ uintptr_t bootstrap_entry;
 _Atomic uint8_t *cores_status;
 /* The core this worker is in charge of. */
 uint8_t core;
-/* Whether the existing PSCI implementation uses and extended power state or not. */
+/* 
+ * Whether the existing PSCI implementation uses and extended power state or not.
+ * The ZCU102 platform uses the extended format, while QEMU and MaaxBoard do not.
+ */
 uint32_t has_ext_power_state;
 
 // ============================================================================
@@ -115,6 +118,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
 /**
  * Execute the instruction received from the Core Manager.
  * Handles core power management commands and timer-based benchmarking.
+ * @param instr Instruction to execute
  */
 static void handle_instruction(Instruction instr) {
     switch (instr) {
@@ -142,6 +146,7 @@ static void handle_instruction(Instruction instr) {
 
 /**
  * Query PSCI to determine whether to use original or extended power state format.
+ * @return 1 if extended power state format is supported, 0 otherwise
  */
 static uint32_t psci_has_ext_power_state(void) {
     seL4_ARM_SMCContext args = {.x0 = PSCI_FEATURES, .x1 = PSCI_CPU_SUSPEND};
@@ -207,11 +212,14 @@ static void core_suspend(seL4_Bool power_down) {
      * PSCI CPU Suspend SMC (x0):
      *  x1: Power state encoding
      *  x2: Entry point address for resume (used in powerdown mode)
+     *  x3: Extended power state indicator. Not used by the firmware, but set so the kernel
+     *      knows which format to use.
      */
     seL4_ARM_SMCContext args = {
         .x0 = PSCI_CPU_SUSPEND,
         .x1 = power_state,
-        .x2 = bootstrap_entry
+        .x2 = bootstrap_entry,
+        .x3 = has_ext_power_state
     };
     seL4_ARM_SMCContext response;
 

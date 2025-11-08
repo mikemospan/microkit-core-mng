@@ -367,6 +367,20 @@ static void execute_command(char *cmd) {
         } else {
             uart_puts("Usage: on <core_id>\n");
         }
+    } else if (str_eq(command, "restart")) {
+        char *arg = next_token(&cmd);
+        if (arg) {
+            int core_id = str_to_int(arg, &parse_success);
+            if (!parse_success || core_id < 0 || core_id >= NUM_CPUS) {
+                uart_puts("Error: core_id must be a number between 0 and ");
+                uart_put64(NUM_CPUS - 1);
+                uart_puts("\n");
+            } else {
+                err = send_core_command(CORE_RESTART_PDS, core_id, 0);
+            }
+        } else {
+            uart_puts("Usage: restart <core_id>\n");
+        }
     } else {
         uart_puts("Unknown command. Type 'help' for a list of commands.\n");
     }
@@ -479,6 +493,7 @@ static void print_help(void) {
         "powerdown <core_id>      - Power down a core\n"
         "standby <core_id>        - Put a core in standby mode\n"
         "on <core_id>             - Turn on a core\n"
+        "restart <core_id>        - Restart all PDs on a core\n"
     );
 }
 

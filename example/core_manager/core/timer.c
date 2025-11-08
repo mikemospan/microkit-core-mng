@@ -134,6 +134,23 @@ static void plat_timer_ack_irq(void) {
     (void)ttc_r(TTC_INT_STATUS_1);
 }
 
+#elif defined(CONFIG_PLAT_QEMU_ARM_VIRT)
+static void plat_timer_setup(void) {
+    
+}
+
+static void plat_timer_enable_irq(void) {
+    
+}
+
+static void plat_timer_disable_irq(void) {
+    
+}
+
+static void plat_timer_ack_irq(void) {
+    
+}
+
 #else
 #error "Select CONFIG_PLAT_MAAXBOARD or CONFIG_PLAT_ZYNQMP"
 #endif

@@ -2328,19 +2328,18 @@ fn build_system(
 
         // Flatten irq bitmasks into bytes in C row-major order
         let mut core_pds_bytes = vec![0u8; config.cores as usize * MAX_PDS * PD_MAX_NAME_LENGTH];
-        let mut pd_irqs_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+        let mut pd_irqs_bytes   = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
         let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
         let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+
         for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
             let offset = (pd.cpu as usize * MAX_PDS * PD_MAX_NAME_LENGTH) + pd_idx * PD_MAX_NAME_LENGTH;
             let slot = &mut core_pds_bytes[offset .. offset + PD_MAX_NAME_LENGTH];
 
             // Copy PD name as bytes
             let name_bytes = pd.name.as_bytes();
-            // Leave room for null terminator
-            let len = name_bytes.len().min(PD_MAX_NAME_LENGTH - 1);
+            let len = name_bytes.len().min(PD_MAX_NAME_LENGTH - 1); // leave room for '\0'
             slot[..len].copy_from_slice(&name_bytes[..len]);
-            // Explicit null terminator
             slot[len] = 0;
 
             pd_irqs_bytes.extend_from_slice(&pd.irq_bits().to_le_bytes());
@@ -2348,10 +2347,32 @@ fn build_system(
             pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
         }
 
-        let pd_irqs_bytes   = pd_irqs_bytes.as_slice();
-        let pd_budget_bytes = pd_budget_bytes.as_slice();
-        let pd_period_bytes = pd_period_bytes.as_slice();
-        let core_pds_bytes  = core_pds_bytes.as_slice();
+        // --- Build pd_infos: interleave {core, irqs, budget, period} per PD (all u64, LE) ---
+        let n_pds = system.protection_domains.len();
+        debug_assert_eq!(pd_irqs_bytes.len(),   n_pds * 8);
+        debug_assert_eq!(pd_budget_bytes.len(), n_pds * 8);
+        debug_assert_eq!(pd_period_bytes.len(), n_pds * 8);
+
+        let pd_info_size = 4 * core::mem::size_of::<u64>(); // 32 bytes
+        let expected_len = MAX_PDS * pd_info_size;
+        let mut pd_infos_bytes = Vec::with_capacity(expected_len);
+
+        for (i, pd) in system.protection_domains.iter().enumerate() {
+            // core as u64 (little-endian)
+            let core_u64 = pd.cpu as u64;
+            pd_infos_bytes.extend_from_slice(&core_u64.to_le_bytes());
+
+            // slice helpers for the i-th u64 from each buffer
+            let off = i * 8;
+            pd_infos_bytes.extend_from_slice(&pd_irqs_bytes[off .. off + 8]);
+            pd_infos_bytes.extend_from_slice(&pd_budget_bytes[off .. off + 8]);
+            pd_infos_bytes.extend_from_slice(&pd_period_bytes[off .. off + 8]);
+        }
+
+        // Pad out to sizeof(pd_info) * MAX_PDS (C expects a fixed-size array)
+        if pd_infos_bytes.len() < expected_len {
+            pd_infos_bytes.resize(expected_len, 0);
+        }
 
         for (i, pd) in system.protection_domains.iter().enumerate() {
             let elf = match pd_elf_files.get_mut(i) {
@@ -2361,16 +2382,17 @@ fn build_system(
 
             match pd.name.as_str() {
                 "core_manager_api" => {
-                    elf.write_symbol("pd_irqs",  pd_irqs_bytes).map_err(|e| format!("write pd_irqs: {e}"))?;
-                    elf.write_symbol("pd_budget", pd_budget_bytes).map_err(|e| format!("write pd_budget: {e}"))?;
-                    elf.write_symbol("pd_period", pd_period_bytes).map_err(|e| format!("write pd_period: {e}"))?;
+                    elf.write_symbol("pd_infos", &pd_infos_bytes)
+                        .map_err(|e| format!("write pd_infos: {e}"))?;
                 }
                 "core_manager" => {
-                    elf.write_symbol("core_pds", core_pds_bytes).map_err(|e| format!("write core_pds: {e}"))?;
+                    elf.write_symbol("core_pds", core_pds_bytes.as_slice())
+                        .map_err(|e| format!("write core_pds: {e}"))?;
                 }
                 name if name.starts_with("core_worker") => {
                     let core_le = (pd.cpu as u8).to_le_bytes();
-                    elf.write_symbol("core", &core_le).map_err(|e| format!("write core: {e}"))?;
+                    elf.write_symbol("core", &core_le)
+                        .map_err(|e| format!("write core: {e}"))?;
                 }
                 _ => { /* ignore anything else */ }
             }

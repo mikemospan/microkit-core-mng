@@ -7,6 +7,7 @@
 // ============================================================================
 
 #define PD_INIT_ENTRY           0x200000
+#define PD_INIT_SP              0x10000000000
 
 #define BASE_SCHED_CONTEXT_CAP  394
 #define BASE_SCHED_CONTROL_CAP  458
@@ -30,9 +31,14 @@ void *bootstrap_vaddr;
 Instruction *instruction_vaddr;
 
 // Per-PD scheduling and IRQ configuration
-uint64_t pd_irqs[MAX_PDS];    // Bitmask of IRQs assigned to each PD
-uint64_t pd_budget[MAX_PDS];  // Scheduling budgets (in microseconds)
-uint64_t pd_period[MAX_PDS];  // Scheduling periods (in microseconds)
+typedef struct {
+    uint64_t pd_core;       // The CPU core the PD resides on
+    uint64_t pd_irqs;       // Bitmask of IRQs assigned to each PD
+    uint64_t pd_budget;     // Scheduling budgets (in microseconds)
+    uint64_t pd_period;     // Scheduling periods (in microseconds)
+} pd_info;
+
+pd_info pd_infos[MAX_PDS];
 
 // Core management state
 uint8_t monitor_core = 0;     // Core currently running the Monitor PD
@@ -49,9 +55,10 @@ uintptr_t bootstrap_entry;
 static inline seL4_Error core_migrate(uint8_t pd, uint8_t core);
 static inline void monitor_migrate(uint8_t core);
 static void core_on(uint8_t core, seL4_Word cpu_bootstrap);
-static seL4_Word core_status(uint8_t core);
+static inline seL4_Word core_status(uint8_t core);
 static microkit_msginfo cores_query(void);
 static void cores_restart_pmu(void);
+static void manager_restart_pd(microkit_child pd, seL4_Word entry_point, seL4_Word new_sp);
 
 // ============================================================================
 // Microkit API Implementation
@@ -98,13 +105,15 @@ void notified(microkit_channel ch) {
 }
 
 /**
- * Handle protected procedure calls from other PDs.
- * Provides core management operations:
- * - CORE_ON: Power on a secondary core
- * - CORE_OFF/POWERDOWN/STANDBY: Power down a core
- * - CORE_MIGRATE: Migrate a PD to a different core
- * - CORE_MIGRATE_MONITOR: Migrate the Monitor PD to a different core
- * - CORE_STATUS: Query core power state
+ * Handle protected calls from other PDs:
+ * - CORE_ON: Power on a core (PSCI_CPU_ON; secondary boots and joins scheduler)
+ * - CORE_OFF/POWERDOWN/STANDBY: Request core enter low-power; validate and notify worker
+ * - CORE_MIGRATE: Move a PD to the target core (set affinity)
+ * - CORE_MIGRATE_MONITOR: Move the Monitor PD to the target core
+ * - CORE_STATUS: Return the target core’s power state
+ * - CORE_RESTART_PDS: Restart all PDs on the core via manager_restart_pd to avoid post-CPU_ON race
+ * - CORES_QUERY: Return a summary of core states
+ * - CORES_RESTART_PMU: Reinitialise PMU on all cores
  */
 microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
     // Read command and parameters from message registers
@@ -115,9 +124,7 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
 
     switch (instruction_vaddr[0]) {
         case CORE_ON:
-            // Power on the specified core and restart its worker PD
             core_on(core, bootstrap_entry);
-            microkit_pd_restart(core + 1, PD_INIT_ENTRY);
             break;
 
         case CORE_OFF:
@@ -155,6 +162,15 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
         case CORE_STATUS:
             // Query the power state of the specified core
             ret = core_status(core);
+            break;
+
+        case CORE_RESTART_PDS:
+            // Restart all PDs on the specified core
+            for (int pd_id = 0; pd_id < MAX_PDS; pd_id++) {
+                if (pd_infos[pd_id].pd_core == core) {
+                    manager_restart_pd(pd_id, PD_INIT_ENTRY, PD_INIT_SP);
+                }
+            }
             break;
 
         case CORES_QUERY:
@@ -202,7 +218,7 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
 }
 
 // ============================================================================
-// Core Operations (PSCI Interface)
+// Core Operations
 // ============================================================================
 
 /**
@@ -236,18 +252,20 @@ static inline seL4_Error core_migrate(uint8_t pd, uint8_t core) {
     seL4_SchedControl_ConfigureFlags(
         BASE_SCHED_CONTROL_CAP + core,  // Target core's scheduling control
         BASE_SCHED_CONTEXT_CAP + pd,    // PD's scheduling context
-        pd_period[pd],                  // Scheduling period
-        pd_budget[pd],                  // Scheduling budget
+        pd_infos[pd].pd_period,         // Scheduling period
+        pd_infos[pd].pd_budget,         // Scheduling budget
         0,                              // Extra refills
         0x100 + pd,                     // Badge
         0                               // Flags
     );
 
     for (int i = 0; i < MAX_IRQS; i++) {
-        if (pd_irqs[pd] & (1ULL << i)) {
+        if (pd_infos[pd].pd_irqs & (1ULL << i)) {
             seL4_IRQHandler_SetCore(BASE_IRQ_CAP + i, core);
         }
     }
+
+    pd_infos[pd].pd_core = core;
 
     return 0;
 }
@@ -274,7 +292,7 @@ static inline void monitor_migrate(uint8_t core) {
  * @param core Core number to query
  * @return Core status according to the CoreStatus enum
  */
-static seL4_Word core_status(uint8_t core) {
+static inline seL4_Word core_status(uint8_t core) {
     return atomic_load(cores_status + 1 + core);
 }
 
@@ -306,5 +324,38 @@ static microkit_msginfo cores_query(void) {
 static void cores_restart_pmu(void) {
     for (uint8_t i = 0; i < NUM_CPUS; i++) {
         microkit_ppcall(i + 2, microkit_msginfo_new(0, 0));
+    }
+}
+
+/**
+ * Restart a protection domain on its assigned core.
+ * 
+ * Note: We cannot use microkit_pd_restart here because of a race.
+ * After CPU_ON the secondary core may join the scheduler and run the PD
+ * before we rewrite its context. Instead we:
+ *   (1) Suspend the PD’s TCB,
+ *   (2) write a full context (PC + SP) with resume=true,
+ * 
+ * @param pd Protection domain to restart
+ * @param entry_point New entry point for the PD
+ * @param new_sp New stack pointer for the PD
+ */
+static void manager_restart_pd(microkit_child pd, seL4_Word entry_point, seL4_Word new_sp) {
+    seL4_CPtr tcb = BASE_TCB_CAP + pd;
+
+    seL4_TCB_Suspend(tcb);
+
+    seL4_UserContext c = {0};
+    c.sp  = new_sp;
+    c.pc  = entry_point;
+
+    seL4_Error err = seL4_TCB_WriteRegisters(tcb,
+                                             seL4_True,
+                                             0, /* No flags */
+                                             sizeof c / sizeof(seL4_Word),
+                                             &c);
+    if (err != seL4_NoError) {
+        microkit_dbg_puts("microkit_pd_restart: WriteRegisters failed\n");
+        microkit_internal_crash(err);
     }
 }
