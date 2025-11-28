@@ -2327,76 +2327,93 @@ fn build_system(
         }
 
         // Flatten irq bitmasks into bytes in C row-major order
-        let mut core_pds_bytes = vec![0u8; config.cores as usize * MAX_PDS * PD_MAX_NAME_LENGTH];
-        let mut pd_irqs_bytes   = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
-        let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
-        let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+let mut core_pds_bytes = vec![0u8; config.cores as usize * MAX_PDS * PD_MAX_NAME_LENGTH];
+let mut pd_irqs_bytes   = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+let mut pd_budget_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
+let mut pd_period_bytes = Vec::with_capacity(MAX_PDS * 8); // 8 bytes per PD (u64)
 
-        for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
-            let offset = (pd.cpu as usize * MAX_PDS * PD_MAX_NAME_LENGTH) + pd_idx * PD_MAX_NAME_LENGTH;
-            let slot = &mut core_pds_bytes[offset .. offset + PD_MAX_NAME_LENGTH];
+for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    let offset = (pd.cpu as usize * MAX_PDS * PD_MAX_NAME_LENGTH) + pd_idx * PD_MAX_NAME_LENGTH;
+    let slot = &mut core_pds_bytes[offset .. offset + PD_MAX_NAME_LENGTH];
 
-            // Copy PD name as bytes
-            let name_bytes = pd.name.as_bytes();
-            let len = name_bytes.len().min(PD_MAX_NAME_LENGTH - 1); // leave room for '\0'
-            slot[..len].copy_from_slice(&name_bytes[..len]);
-            slot[len] = 0;
+    // Copy PD name as bytes
+    let name_bytes = pd.name.as_bytes();
+    let len = name_bytes.len().min(PD_MAX_NAME_LENGTH - 1); // leave room for '\0'
+    slot[..len].copy_from_slice(&name_bytes[..len]);
+    slot[len] = 0;
 
-            pd_irqs_bytes.extend_from_slice(&pd.irq_bits().to_le_bytes());
-            pd_budget_bytes.extend_from_slice(&pd.budget.to_le_bytes());
-            pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
-        }
+    pd_irqs_bytes.extend_from_slice(&pd.irq_bits().to_le_bytes());
+    pd_budget_bytes.extend_from_slice(&pd.budget.to_le_bytes());
+    pd_period_bytes.extend_from_slice(&pd.period.to_le_bytes());
+}
 
-        // --- Build pd_infos: interleave {core, irqs, budget, period} per PD (all u64, LE) ---
-        let n_pds = system.protection_domains.len();
-        debug_assert_eq!(pd_irqs_bytes.len(),   n_pds * 8);
-        debug_assert_eq!(pd_budget_bytes.len(), n_pds * 8);
-        debug_assert_eq!(pd_period_bytes.len(), n_pds * 8);
+    // --- Build pd_infos: interleave {core, irqs, budget, period} per PD (all u64, LE) ---
+    let n_pds = system.protection_domains.len();
+    debug_assert_eq!(pd_irqs_bytes.len(),   n_pds * 8);
+    debug_assert_eq!(pd_budget_bytes.len(), n_pds * 8);
+    debug_assert_eq!(pd_period_bytes.len(), n_pds * 8);
 
-        let pd_info_size = 4 * core::mem::size_of::<u64>(); // 32 bytes
-        let expected_len = MAX_PDS * pd_info_size;
-        let mut pd_infos_bytes = Vec::with_capacity(expected_len);
+    let pd_info_size = 4 * core::mem::size_of::<u64>(); // 32 bytes
+    let expected_len = MAX_PDS * pd_info_size;
 
-        for (i, pd) in system.protection_domains.iter().enumerate() {
-            // core as u64 (little-endian)
-            let core_u64 = pd.cpu as u64;
-            pd_infos_bytes.extend_from_slice(&core_u64.to_le_bytes());
+    // Pre-initialise all entries with core = -1 (u64::MAX), others = 0
+    let mut pd_infos_bytes = Vec::with_capacity(expected_len);
+    for _ in 0..MAX_PDS {
+        pd_infos_bytes.extend_from_slice(&u64::MAX.to_le_bytes()); // pd_core = -1
+        pd_infos_bytes.extend_from_slice(&0u64.to_le_bytes());     // pd_irqs
+        pd_infos_bytes.extend_from_slice(&0u64.to_le_bytes());     // pd_budget
+        pd_infos_bytes.extend_from_slice(&0u64.to_le_bytes());     // pd_period
+    }
+    debug_assert_eq!(pd_infos_bytes.len(), expected_len);
 
-            // slice helpers for the i-th u64 from each buffer
-            let off = i * 8;
-            pd_infos_bytes.extend_from_slice(&pd_irqs_bytes[off .. off + 8]);
-            pd_infos_bytes.extend_from_slice(&pd_budget_bytes[off .. off + 8]);
-            pd_infos_bytes.extend_from_slice(&pd_period_bytes[off .. off + 8]);
-        }
+    // Overwrite entries for actual PDs
+    for (i, pd) in system.protection_domains.iter().enumerate() {
+        let struct_off = i * pd_info_size;
+        let u64_off    = i * 8; // index into the flat u64 arrays
 
-        // Pad out to sizeof(pd_info) * MAX_PDS (C expects a fixed-size array)
-        if pd_infos_bytes.len() < expected_len {
-            pd_infos_bytes.resize(expected_len, 0);
-        }
+        // core as u64 (little-endian)
+        let core_u64 = pd.cpu as u64;
+        pd_infos_bytes[struct_off .. struct_off + 8]
+            .copy_from_slice(&core_u64.to_le_bytes());
 
-        for (i, pd) in system.protection_domains.iter().enumerate() {
-            let elf = match pd_elf_files.get_mut(i) {
-                Some(e) => e,
-                None => return Err(format!("Missing ELF for PD {}", i)),
-            };
+        // irqs
+        pd_infos_bytes[struct_off + 8  .. struct_off + 16]
+            .copy_from_slice(&pd_irqs_bytes[u64_off .. u64_off + 8]);
 
-            match pd.name.as_str() {
-                "core_manager_api" => {
-                    elf.write_symbol("pd_infos", &pd_infos_bytes)
-                        .map_err(|e| format!("write pd_infos: {e}"))?;
-                }
-                "core_manager" => {
-                    elf.write_symbol("core_pds", core_pds_bytes.as_slice())
-                        .map_err(|e| format!("write core_pds: {e}"))?;
-                }
-                name if name.starts_with("core_worker") => {
-                    let core_le = (pd.cpu as u8).to_le_bytes();
-                    elf.write_symbol("core", &core_le)
-                        .map_err(|e| format!("write core: {e}"))?;
-                }
-                _ => { /* ignore anything else */ }
+        // budget
+        pd_infos_bytes[struct_off + 16 .. struct_off + 24]
+            .copy_from_slice(&pd_budget_bytes[u64_off .. u64_off + 8]);
+
+        // period
+        pd_infos_bytes[struct_off + 24 .. struct_off + 32]
+            .copy_from_slice(&pd_period_bytes[u64_off .. u64_off + 8]);
+    }
+
+    // No need to resize now: we already filled expected_len bytes.
+
+    for (i, pd) in system.protection_domains.iter().enumerate() {
+        let elf = match pd_elf_files.get_mut(i) {
+            Some(e) => e,
+            None => return Err(format!("Missing ELF for PD {}", i)),
+        };
+
+        match pd.name.as_str() {
+            "core_manager_api" => {
+                elf.write_symbol("pd_infos", &pd_infos_bytes)
+                    .map_err(|e| format!("write pd_infos: {e}"))?;
             }
+            "core_manager" => {
+                elf.write_symbol("core_pds", core_pds_bytes.as_slice())
+                    .map_err(|e| format!("write core_pds: {e}"))?;
+            }
+            name if name.starts_with("core_worker") => {
+                let core_le = (pd.cpu as u8).to_le_bytes();
+                elf.write_symbol("core", &core_le)
+                    .map_err(|e| format!("write core: {e}"))?;
+            }
+            _ => { /* ignore anything else */ }
         }
+    }
     }
 
     /* --- END: CORE MANAGER PRIVILIGED ACCESS GRANTING CODE  --- */

@@ -1,4 +1,3 @@
-#include <stdatomic.h>
 #include "core.h"
 #include "uart.h"
 
@@ -42,7 +41,6 @@ pd_info pd_infos[MAX_PDS];
 
 // Core management state
 uint8_t monitor_core = 0;     // Core currently running the Monitor PD
-_Atomic uint8_t *cores_status; // Contains the current status of each core
 
 /* Physical entry point for bootstrapping code. */
 uintptr_t bootstrap_entry;
@@ -89,11 +87,6 @@ void init(void) {
     
     // Memory barrier to ensure cache operations complete
     asm volatile("dsb ish");
-
-    atomic_store(cores_status, NUM_CPUS);
-    for (int i = 0; i < NUM_CPUS; i++) {
-        atomic_store(cores_status + i + 1, CORE_ON);
-    }
 }
 
 /**
@@ -130,18 +123,15 @@ microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
         case CORE_OFF:
         case CORE_POWERDOWN:
         case CORE_STANDBY:
-            // Validate that we can power down this core
-            if (atomic_load(cores_status) == 1) {
-                uart_puts("Cannot power down: only 1 core remains.\n");
-                ret = 1;
-                break;
-            } else if (core == monitor_core) {
+            if (core == monitor_core) {
                 uart_puts("Cannot power down core containing the Monitor.\n");
                 ret = 1;
                 break;
             }
+
             // Notify the core to shut down
-            if (core_status(core) == CORE_ON) {
+            seL4_Bool online = core_status(core);
+            if (online) {
                 microkit_notify(core + 2);
             } else {
                 uart_puts("The core you are putting into a lower power state, is not on\n");
@@ -290,10 +280,11 @@ static inline void monitor_migrate(uint8_t core) {
 /**
  * Query the power state of a core.
  * @param core Core number to query
- * @return Core status according to the CoreStatus enum
+ * @return 0 if offline, 1 if online
  */
 static inline seL4_Word core_status(uint8_t core) {
-    return atomic_load(cores_status + 1 + core);
+    seL4_SchedControl_CoreStatus_t res = seL4_SchedControl_CoreStatus(BASE_SCHED_CONTROL_CAP + core);
+    return res.status;
 }
 
 /**
@@ -304,8 +295,8 @@ static inline seL4_Word core_status(uint8_t core) {
 static microkit_msginfo cores_query(void) {
     uint64_t core_cycles[NUM_CPUS];
     for (uint8_t i = 0; i < NUM_CPUS; i++) {
-        seL4_Word status = core_status(i);
-        if (status == CORE_ON) {
+        seL4_Word online = core_status(i);
+        if (online) {
             microkit_ppcall(i + 2, microkit_msginfo_new(0, 0));
             core_cycles[i] = microkit_mr_get(0);
         }

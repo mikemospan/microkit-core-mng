@@ -15,7 +15,7 @@ PROFILER_DIR := profiler
 BOOTSTRAP_DIR := bootstrap
 IMAGES := core_manager.elf core_manager_api.elf core_worker.elf timer.elf
 LDFLAGS := -L$(BOARD_DIR)/lib -T $(BOOTSTRAP_DIR)/bootstrap.ld
-CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -mno-outline-atomics -g -O3 -Wall -Wno-unused-function -Werror \
+CFLAGS := -mcpu=$(CPU) -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror \
           -I. -I$(BOARD_DIR)/include -I$(CORE_DIR) -I$(PROFILER_DIR) \
           -DNUM_CPUS=$(NUM_CPUS) -DBOARD_$(MICROKIT_BOARD) -DPRINTING=$(PRINTING)
 

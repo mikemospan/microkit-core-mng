@@ -29,8 +29,6 @@
 Instruction *instruction_vaddr;
 /* Physical entry point for bootstrapping code. */
 uintptr_t bootstrap_entry;
-/* Status of every core (ON, OFF, POWERDOWN, STANDBY). */
-_Atomic uint8_t *cores_status;
 /* The core this worker is in charge of. */
 uint8_t core;
 /* 
@@ -165,10 +163,6 @@ static uint32_t psci_has_ext_power_state(void) {
  * This is a non-returning call - the core will be powered down.
  */
 static void core_off(void) {
-    /* Mark the core as offline and decrement the number of cores counter. */
-    atomic_store(cores_status + 1 + core, CORE_OFF);
-    atomic_fetch_sub(cores_status, 1);
-
     seL4_ARM_SMCContext args = {.x0 = PSCI_CPU_OFF};
     seL4_ARM_SMCContext response;
 
@@ -204,10 +198,6 @@ static void core_suspend(seL4_Bool power_down) {
     /* Nothing to do here, state ID is expected to be 0. */
 #endif
 
-    /* Mark the core as offline and decrement the number of cores counter. */
-    atomic_store(cores_status + 1 + core, power_down ? CORE_POWERDOWN : CORE_STANDBY);
-    atomic_fetch_sub(cores_status, 1);
-
     /*
      * PSCI CPU Suspend SMC (x0):
      *  x1: Power state encoding
@@ -231,10 +221,6 @@ static void core_suspend(seL4_Bool power_down) {
     if (!err && power_down) {
         uart_puts("BUG: We don't expect to get to this point...\n");
     }
-
-    /* Mark the core as online and increment the number of cores counter. */
-    atomic_store(cores_status + 1 + core, CORE_ON);
-    atomic_fetch_add(cores_status, 1);
 }
 
 // ============================================================================
